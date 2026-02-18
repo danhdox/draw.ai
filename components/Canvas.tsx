@@ -472,24 +472,23 @@ export function Canvas({ onAddNode }: CanvasProps) {
       })}
 
       {/* Connecting line */}
-      {isConnecting && connectingFrom && (
-        <line
-          x1={
-            diagram.nodes.find(n => n.id === connectingFrom.nodeId)!.x +
-            diagram.nodes.find(n => n.id === connectingFrom.nodeId)!.w / 2
-          }
-          y1={
-            diagram.nodes.find(n => n.id === connectingFrom.nodeId)!.y +
-            diagram.nodes.find(n => n.id === connectingFrom.nodeId)!.h / 2
-          }
-          x2={viewBox.x + viewBox.width / 2}
-          y2={viewBox.y + viewBox.height / 2}
-          stroke="#3b82f6"
-          strokeWidth="2"
-          strokeDasharray="5,5"
-          pointerEvents="none"
-        />
-      )}
+      {isConnecting && connectingFrom && (() => {
+        const fromNode = diagram.nodes.find(n => n.id === connectingFrom.nodeId)
+        if (!fromNode) return null
+        
+        return (
+          <line
+            x1={fromNode.x + fromNode.w / 2}
+            y1={fromNode.y + fromNode.h / 2}
+            x2={viewBox.x + viewBox.width / 2}
+            y2={viewBox.y + viewBox.height / 2}
+            stroke="#3b82f6"
+            strokeWidth="2"
+            strokeDasharray="5,5"
+            pointerEvents="none"
+          />
+        )
+      })()}
     </svg>
   )
 }

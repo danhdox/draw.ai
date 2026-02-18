@@ -111,17 +111,16 @@ export function InspectorTabs() {
                       type="color"
                       value={selectedNodes[0].style?.fill || '#ffffff'}
                       onChange={(e) => {
-                        selectedNodes.forEach((node) => {
-                          applyDiffWithHistory({
-                            ops: [{
-                              type: 'updateNode',
-                              id: node.id,
-                              patch: {
-                                style: { ...node.style, fill: e.target.value },
-                              },
-                            }],
-                            summary: 'Change fill color',
-                          })
+                        const ops = selectedNodes.map((node) => ({
+                          type: 'updateNode' as const,
+                          id: node.id,
+                          patch: {
+                            style: { ...node.style, fill: e.target.value },
+                          },
+                        }))
+                        applyDiffWithHistory({
+                          ops,
+                          summary: 'Change fill color',
                         })
                       }}
                       className="mt-1"
@@ -133,17 +132,16 @@ export function InspectorTabs() {
                       type="color"
                       value={selectedNodes[0].style?.stroke || '#000000'}
                       onChange={(e) => {
-                        selectedNodes.forEach((node) => {
-                          applyDiffWithHistory({
-                            ops: [{
-                              type: 'updateNode',
-                              id: node.id,
-                              patch: {
-                                style: { ...node.style, stroke: e.target.value },
-                              },
-                            }],
-                            summary: 'Change stroke color',
-                          })
+                        const ops = selectedNodes.map((node) => ({
+                          type: 'updateNode' as const,
+                          id: node.id,
+                          patch: {
+                            style: { ...node.style, stroke: e.target.value },
+                          },
+                        }))
+                        applyDiffWithHistory({
+                          ops,
+                          summary: 'Change stroke color',
                         })
                       }}
                       className="mt-1"
@@ -155,17 +153,16 @@ export function InspectorTabs() {
                       type="number"
                       value={selectedNodes[0].style?.strokeWidth || 2}
                       onChange={(e) => {
-                        selectedNodes.forEach((node) => {
-                          applyDiffWithHistory({
-                            ops: [{
-                              type: 'updateNode',
-                              id: node.id,
-                              patch: {
-                                style: { ...node.style, strokeWidth: parseInt(e.target.value) || 2 },
-                              },
-                            }],
-                            summary: 'Change stroke width',
-                          })
+                        const ops = selectedNodes.map((node) => ({
+                          type: 'updateNode' as const,
+                          id: node.id,
+                          patch: {
+                            style: { ...node.style, strokeWidth: parseInt(e.target.value) || 2 },
+                          },
+                        }))
+                        applyDiffWithHistory({
+                          ops,
+                          summary: 'Change stroke width',
                         })
                       }}
                       className="mt-1"

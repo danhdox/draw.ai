@@ -90,7 +90,11 @@ export function createEmptyDiagram(): Diagram {
 }
 
 // Helper to generate unique IDs
-let idCounter = 0
 export function generateId(prefix: string = 'node'): string {
-  return `${prefix}-${Date.now()}-${idCounter++}`
+  // Use crypto for better uniqueness
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return `${prefix}-${crypto.randomUUID()}`
+  }
+  // Fallback for environments without crypto.randomUUID
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
 }
