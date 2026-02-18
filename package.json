@@ -1,0 +1,57 @@
+{
+  "name": "draw-ai",
+  "version": "0.1.0",
+  "description": "A fast, web-based diagram editor inspired by draw.io, with an AI copilot",
+  "author": "danhdox",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/danhdox/draw.ai"
+  },
+  "keywords": [
+    "diagram",
+    "editor",
+    "flowchart",
+    "ai",
+    "draw.io",
+    "nextjs",
+    "typescript"
+  ],
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^3.0.29",
+    "ai": "^6.0.90",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "elkjs": "^0.9.3",
+    "lucide-react": "^0.468.0",
+    "next": "^15.1.6",
+    "next-themes": "^0.4.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^2.6.1",
+    "zod": "^3.24.1",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^9",
+    "eslint-config-next": "^15.1.6",
+    "happy-dom": "^20.6.2",
+    "jsdom": "^28.1.0",
+    "postcss": "^8",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5",
+    "vitest": "^3.0.0"
+  }
+}
