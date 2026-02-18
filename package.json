@@ -1,6 +1,22 @@
 {
   "name": "draw-ai",
   "version": "0.1.0",
+  "description": "A fast, web-based diagram editor inspired by draw.io, with an AI copilot",
+  "author": "danhdox",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/danhdox/draw.ai"
+  },
+  "keywords": [
+    "diagram",
+    "editor",
+    "flowchart",
+    "ai",
+    "draw.io",
+    "nextjs",
+    "typescript"
+  ],
   "private": true,
   "scripts": {
     "dev": "next dev",
