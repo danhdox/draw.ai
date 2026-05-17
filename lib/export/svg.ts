@@ -1,7 +1,12 @@
 import { Diagram } from '@/lib/model/diagram'
+import { downloadBlob } from '@/lib/export/download'
 
 // Export diagram as SVG
 export function exportSVG(diagram: Diagram): string {
+  if (diagram.nodes.length === 0) {
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">\n  <rect width="800" height="600" fill="white"/>\n</svg>'
+  }
+
   // Calculate bounds
   let minX = Infinity
   let minY = Infinity
@@ -111,10 +116,5 @@ export function exportSVG(diagram: Diagram): string {
 export function downloadSVG(diagram: Diagram, filename = 'diagram.svg') {
   const svg = exportSVG(diagram)
   const blob = new Blob([svg], { type: 'image/svg+xml' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+  downloadBlob(blob, filename)
 }

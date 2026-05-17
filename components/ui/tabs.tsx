@@ -2,7 +2,9 @@ import * as React from 'react'
 import { cn } from '@/lib/utils'
 
 export interface TabsProps {
-  defaultValue: string
+  defaultValue?: string
+  value?: string
+  onValueChange?: (value: string) => void
   className?: string
   children: React.ReactNode
 }
@@ -32,8 +34,10 @@ const TabsContext = React.createContext<{
   setValue: () => {},
 })
 
-export function Tabs({ defaultValue, className, children }: TabsProps) {
-  const [value, setValue] = React.useState(defaultValue)
+export function Tabs({ defaultValue, value: controlledValue, onValueChange, className, children }: TabsProps) {
+  const [uncontrolledValue, setUncontrolledValue] = React.useState(defaultValue ?? '')
+  const value = controlledValue ?? uncontrolledValue
+  const setValue = onValueChange ?? setUncontrolledValue
 
   return (
     <TabsContext.Provider value={{ value, setValue }}>

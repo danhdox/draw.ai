@@ -11,7 +11,7 @@ interface CanvasProps {
 
 export function Canvas({ onAddNode }: CanvasProps) {
   const canvasRef = useRef<SVGSVGElement>(null)
-  const [viewBox, setViewBox] = useState({ x: 0, y: 0, width: 2000, height: 2000 })
+  const [viewBox, setViewBox] = useState({ x: 0, y: 0, width: 1200, height: 800 })
   const [isPanning, setIsPanning] = useState(false)
   const [panStart, setPanStart] = useState({ x: 0, y: 0 })
   const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null)
@@ -219,6 +219,7 @@ export function Canvas({ onAddNode }: CanvasProps) {
           y={node.y}
           width={node.w}
           height={node.h}
+          rx={14}
           fill={fill}
           stroke={stroke}
           strokeWidth={strokeWidth}
@@ -286,7 +287,8 @@ export function Canvas({ onAddNode }: CanvasProps) {
   return (
     <svg
       ref={canvasRef}
-      className="w-full h-full bg-gray-50 dark:bg-gray-900"
+      data-testid="diagram-canvas"
+      className="h-full w-full bg-[#fbfaf7]"
       viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`}
       onMouseDown={handleCanvasMouseDown}
       onMouseMove={handleMouseMove}
@@ -302,13 +304,7 @@ export function Canvas({ onAddNode }: CanvasProps) {
             height={diagram.meta.gridSize}
             patternUnits="userSpaceOnUse"
           >
-            <path
-              d={`M ${diagram.meta.gridSize} 0 L 0 0 0 ${diagram.meta.gridSize}`}
-              fill="none"
-              stroke="gray"
-              strokeWidth="0.5"
-              opacity="0.2"
-            />
+            <circle cx="1" cy="1" r="1" fill="#ded8ce" opacity="0.55" />
           </pattern>
         </defs>
       )}
@@ -318,7 +314,7 @@ export function Canvas({ onAddNode }: CanvasProps) {
         y={viewBox.y}
         width={viewBox.width}
         height={viewBox.height}
-        fill={diagram.meta.gridSize ? 'url(#grid)' : 'transparent'}
+          fill={diagram.meta.gridSize ? 'url(#grid)' : '#fbfaf7'}
       />
 
       {/* Edges */}
@@ -379,7 +375,7 @@ export function Canvas({ onAddNode }: CanvasProps) {
           refY="3"
           orient="auto"
         >
-          <polygon points="0 0, 10 3, 0 6" fill="#000" />
+          <polygon points="0 0, 10 3, 0 6" fill="#7b756b" />
         </marker>
       </defs>
 
@@ -391,6 +387,8 @@ export function Canvas({ onAddNode }: CanvasProps) {
         return (
           <g
             key={node.id}
+            data-node-id={node.id}
+            data-node-type={node.type}
             onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
             onDoubleClick={(e) => handleNodeDoubleClick(e, node.id)}
             onClick={(e) => handleNodeConnectionClick(e, node.id)}
@@ -406,6 +404,8 @@ export function Canvas({ onAddNode }: CanvasProps) {
                 textAnchor="middle"
                 dominantBaseline="middle"
                 fontSize={node.style?.fontSize || 14}
+                fontFamily={node.style?.fontFamily || 'Geist, ui-sans-serif'}
+                fill="#26221d"
                 pointerEvents="none"
               >
                 {node.text}

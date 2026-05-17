@@ -1,7 +1,6 @@
 'use client'
 
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { useDiagramStore } from '@/lib/store/useDiagramStore'
@@ -13,20 +12,17 @@ export function InspectorTabs() {
   const selectedEdges = diagram.edges.filter(e => selectedEdgeIds.has(e.id))
 
   return (
-    <div className="w-80 bg-background border-l overflow-y-auto">
+    <div className="bg-white">
       <Tabs defaultValue="diagram" className="w-full">
-        <TabsList className="w-full">
+        <TabsList className="mx-4 mt-4 grid w-[calc(100%-2rem)] grid-cols-2 rounded-lg bg-[#f4f2ee]">
           <TabsTrigger value="diagram" className="flex-1">Diagram</TabsTrigger>
           <TabsTrigger value="style" className="flex-1">Style</TabsTrigger>
-          <TabsTrigger value="ai" className="flex-1">AI</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="diagram" className="p-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Diagram Info</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+        <TabsContent value="diagram" className="m-0 p-4">
+          <section className="space-y-4">
+            <h3 className="text-sm font-semibold text-[#1d1a16]">Diagram Info</h3>
+            <div className="space-y-4">
               <div>
                 <div className="text-xs text-muted-foreground">Nodes</div>
                 <div className="text-sm font-medium">{diagram.nodes.length}</div>
@@ -70,17 +66,15 @@ export function InspectorTabs() {
                   {diagram.meta.snap ? 'On' : 'Off'}
                 </Button>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
 
           {selectedNodes.length > 0 && (
-            <Card className="mt-4">
-              <CardHeader>
-                <CardTitle className="text-sm">
-                  Selection ({selectedNodes.length} node{selectedNodes.length > 1 ? 's' : ''})
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
+            <section className="mt-6 space-y-3">
+              <h3 className="text-sm font-semibold text-[#1d1a16]">
+                Selection ({selectedNodes.length} node{selectedNodes.length > 1 ? 's' : ''})
+              </h3>
+              <div className="space-y-2">
                 {selectedNodes.map((node) => (
                   <div key={node.id} className="text-xs">
                     <div className="font-medium">{node.type} - {node.id}</div>
@@ -92,17 +86,15 @@ export function InspectorTabs() {
                     </div>
                   </div>
                 ))}
-              </CardContent>
-            </Card>
+              </div>
+            </section>
           )}
         </TabsContent>
 
-        <TabsContent value="style" className="p-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Style Properties</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+        <TabsContent value="style" className="m-0 p-4">
+          <section className="space-y-4">
+            <h3 className="text-sm font-semibold text-[#1d1a16]">Style Properties</h3>
+            <div className="space-y-4">
               {selectedNodes.length > 0 ? (
                 <>
                   <div>
@@ -174,15 +166,8 @@ export function InspectorTabs() {
                   Select a node to edit its style
                 </p>
               )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="ai" className="p-4">
-          {/* AI Panel will be inserted here */}
-          <div className="text-xs text-muted-foreground">
-            AI panel placeholder - see AIPanel component below
-          </div>
+            </div>
+          </section>
         </TabsContent>
       </Tabs>
     </div>
