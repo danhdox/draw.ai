@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Force the deterministic offline AI path in tests — never spend credits.
+      OPENAI_API_KEY: ''
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable corepack (pinned pnpm)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: corepack pnpm@9.15.9 install --frozen-lockfile
+
+      - name: Lint
+        run: corepack pnpm@9.15.9 lint
+
+      - name: Unit tests
+        run: corepack pnpm@9.15.9 test -- --run
+
+      - name: Build
+        run: corepack pnpm@9.15.9 build
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Playwright browsers
+        run: corepack pnpm@9.15.9 exec playwright install --with-deps chromium webkit
+
+      - name: E2E tests
+        run: corepack pnpm@9.15.9 test:e2e
