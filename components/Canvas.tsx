@@ -40,6 +40,15 @@ function unrotate(p: Pt, cx: number, cy: number, deg: number): Pt {
   return { x: cx + dx * Math.cos(r) - dy * Math.sin(r), y: cy + dx * Math.sin(r) + dy * Math.cos(r) }
 }
 
+function markerId(type: 'arrow' | 'open' | 'diamond' | 'circle' | undefined, selected: boolean, isStart: boolean): string {
+  const t = type ?? 'arrow'
+  if (t === 'arrow') {
+    if (isStart) return `url(#${selected ? 'arrowhead-start-sel' : 'arrowhead-start'})`
+    return `url(#${selected ? 'arrowhead-sel' : 'arrowhead'})`
+  }
+  return `url(#${t}${selected ? '-sel' : ''})`
+}
+
 function nodeAtPoint(nodes: DiagramNode[], p: Pt, excludeId?: string): DiagramNode | null {
   for (let i = nodes.length - 1; i >= 0; i--) {
     const n = nodes[i]
@@ -88,7 +97,19 @@ export function Canvas() {
     commitInteraction,
     cancelInteraction,
     applyDiffWithHistory,
+    addNodeAtPoint,
   } = useDiagramStore()
+
+  const onDrop = (e: React.DragEvent<SVGSVGElement>) => {
+    e.preventDefault()
+    const raw = e.dataTransfer.getData('application/draw-shape')
+    if (!raw) return
+    try {
+      const shape = JSON.parse(raw)
+      const p = screenToSVG(e.clientX, e.clientY)
+      addNodeAtPoint(shape, snap(p.x), snap(p.y))
+    } catch { /* ignore malformed drop */ }
+  }
 
   const scale = viewBox.width / Math.max(1, clientW) // world units per screen px
   const H = (px: number) => px * scale // handle dims constant in screen px
@@ -191,6 +212,9 @@ export function Canvas() {
       sel = new Set([nodeId])
       selectNodes([nodeId])
     }
+
+    // Locked nodes can be selected (to unlock) but not dragged.
+    if (node.locked) return
 
     // Include group members.
     diagram.groups.forEach((g) => {
@@ -566,6 +590,8 @@ export function Canvas() {
       onPointerCancel={onPointerUp}
       onWheel={onWheel}
       onContextMenu={onCanvasContextMenu}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={onDrop}
     >
       <defs>
         <pattern id="grid" width={diagram.meta.gridSize} height={diagram.meta.gridSize} patternUnits="userSpaceOnUse">
@@ -575,6 +601,12 @@ export function Canvas() {
         <marker id="arrowhead-start" markerWidth="10" markerHeight="10" refX="1" refY="3" orient="auto-start-reverse"><polygon points="0 0, 10 3, 0 6" fill="#7b756b" /></marker>
         <marker id="arrowhead-sel" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><polygon points="0 0, 10 3, 0 6" fill="#3b82f6" /></marker>
         <marker id="arrowhead-start-sel" markerWidth="10" markerHeight="10" refX="1" refY="3" orient="auto-start-reverse"><polygon points="0 0, 10 3, 0 6" fill="#3b82f6" /></marker>
+        <marker id="open" markerWidth="12" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0 0 L8 3 L0 6" fill="none" stroke="#7b756b" strokeWidth="1.2" /></marker>
+        <marker id="open-sel" markerWidth="12" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0 0 L8 3 L0 6" fill="none" stroke="#3b82f6" strokeWidth="1.2" /></marker>
+        <marker id="diamond" markerWidth="14" markerHeight="10" refX="11" refY="3" orient="auto"><polygon points="0 3, 5 0, 11 3, 5 6" fill="#7b756b" /></marker>
+        <marker id="diamond-sel" markerWidth="14" markerHeight="10" refX="11" refY="3" orient="auto"><polygon points="0 3, 5 0, 11 3, 5 6" fill="#3b82f6" /></marker>
+        <marker id="circle" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto"><circle cx="3" cy="3" r="3" fill="#7b756b" /></marker>
+        <marker id="circle-sel" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto"><circle cx="3" cy="3" r="3" fill="#3b82f6" /></marker>
       </defs>
       <rect className="canvas-bg" x={viewBox.x} y={viewBox.y} width={viewBox.width} height={viewBox.height} fill="url(#grid)" />
 
@@ -591,6 +623,8 @@ export function Canvas() {
         const strokeWidth = (edge.style?.strokeWidth || 2) + (isSelected ? 1 : 0)
         const showEnd = edge.arrowEnd !== false
         const showStart = edge.arrowStart === true
+        const endMarker = markerId(edge.arrowEndType, isSelected, false)
+        const startMarker = markerId(edge.arrowStartType, isSelected, true)
 
         return (
           <g key={edge.id} data-edge-id={edge.id}>
@@ -599,8 +633,8 @@ export function Canvas() {
               onDoubleClick={(ev) => { ev.stopPropagation(); selectEdges([edge.id]); beginInteraction(); setEditingEdgeId(edge.id) }}
               onContextMenu={(ev) => { ev.preventDefault(); ev.stopPropagation(); selectEdges([edge.id]); showContextMenu(ev.clientX, ev.clientY, 'edge') }} />
             <path d={d} fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={edge.style?.strokeDasharray}
-              markerEnd={showEnd ? `url(#${isSelected ? 'arrowhead-sel' : 'arrowhead'})` : undefined}
-              markerStart={showStart ? `url(#${isSelected ? 'arrowhead-start-sel' : 'arrowhead-start'})` : undefined}
+              markerEnd={showEnd ? endMarker : undefined}
+              markerStart={showStart ? startMarker : undefined}
               pointerEvents="none" />
             {edge.label && editingEdgeId !== edge.id && (
               <text x={mid.x} y={mid.y - H(4)} textAnchor="middle" dominantBaseline="middle" fill={stroke} fontSize={H(12)} pointerEvents="none">{edge.label}</text>
@@ -642,17 +676,24 @@ export function Canvas() {
         const rot = node.rotation ? `rotate(${node.rotation} ${cx} ${cy})` : undefined
         return (
           <g key={node.id} data-node-id={node.id} data-node-type={node.type} data-shape-kind={node.shapeKind ?? node.type} transform={rot}
+            tabIndex={0} role="button" aria-label={`${node.shapeKind ?? node.type}${node.text ? `: ${node.text}` : ''}${node.locked ? ' (locked)' : ''}`}
             onPointerDown={(e) => onNodePointerDown(e, node.id)}
             onPointerEnter={() => setHoverNodeId(node.id)} onPointerLeave={() => setHoverNodeId((h) => (h === node.id ? null : h))}
-            onDoubleClick={(e) => { e.stopPropagation(); if (tool !== 'connect') { beginInteraction(); setEditingNodeId(node.id) } }}
+            onDoubleClick={(e) => { e.stopPropagation(); if (tool !== 'connect' && !node.locked) { beginInteraction(); setEditingNodeId(node.id) } }}
+            onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === 'F2') && !node.locked) { e.preventDefault(); selectNodes([node.id]); beginInteraction(); setEditingNodeId(node.id) } }}
             onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (!selectedNodeIds.has(node.id)) selectNodes([node.id]); showContextMenu(e.clientX, e.clientY, 'node') }}
-            style={{ cursor: tool === 'connect' ? 'crosshair' : 'move' }}>
+            style={{ cursor: node.locked ? 'default' : tool === 'connect' ? 'crosshair' : 'move' }}>
             <NodeShape node={node} />
-            {!isEditing && node.text && (
-              <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle" fontSize={node.style?.fontSize || 14}
-                fontFamily={node.style?.fontFamily || 'Geist, ui-sans-serif'} fontWeight={node.style?.fontWeight}
-                fill={node.style?.fontColor || '#26221d'} opacity={node.style?.opacity ?? 1} pointerEvents="none">{node.text}</text>
-            )}
+            {!isEditing && node.text && (() => {
+              const align = node.style?.textAlign
+              const tx = align === 'left' ? node.x + 8 : align === 'right' ? node.x + node.w - 8 : cx
+              const anchor = align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle'
+              return (
+                <text x={tx} y={cy} textAnchor={anchor} dominantBaseline="middle" fontSize={node.style?.fontSize || 14}
+                  fontFamily={node.style?.fontFamily || 'Geist, ui-sans-serif'} fontWeight={node.style?.fontWeight} fontStyle={node.style?.fontStyle}
+                  fill={node.style?.fontColor || '#26221d'} opacity={node.style?.opacity ?? 1} pointerEvents="none">{node.text}</text>
+              )
+            })()}
             {isEditing && (
               <foreignObject x={node.x} y={node.y} width={node.w} height={node.h}>
                 <input autoFocus className="w-full h-full text-center bg-transparent border-none outline-none" value={node.text || ''}
@@ -665,7 +706,14 @@ export function Canvas() {
               <circle cx={node.x + node.w} cy={cy} r={H(5)} fill="#16a34a" stroke="#fff" strokeWidth={H(1.5)} opacity={0.85}
                 style={{ cursor: 'crosshair' }} onPointerDown={(e) => onConnectHandlePointerDown(e, node.id)} />
             )}
-            {isSelected && (
+            {isSelected && node.locked && (
+              <g pointerEvents="none">
+                <rect x={node.x - H(2)} y={node.y - H(2)} width={node.w + H(4)} height={node.h + H(4)} fill="none" stroke="#9a9388" strokeWidth={H(1.5)} strokeDasharray={`${H(4)},${H(3)}`} />
+                <rect x={node.x + node.w - H(16)} y={node.y + H(2)} width={H(12)} height={H(11)} rx={H(2)} fill="#9a9388" />
+                <path d={`M ${node.x + node.w - H(13)} ${node.y + H(4.5)} a ${H(2.5)} ${H(2.5)} 0 0 1 ${H(5)} 0`} fill="none" stroke="#9a9388" strokeWidth={H(1.5)} />
+              </g>
+            )}
+            {isSelected && !node.locked && (
               <>
                 <rect x={node.x - H(2)} y={node.y - H(2)} width={node.w + H(4)} height={node.h + H(4)} fill="none" stroke="#3b82f6" strokeWidth={H(1.5)} pointerEvents="none" />
                 {['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map((handle) => {
