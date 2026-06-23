@@ -106,10 +106,8 @@ export function runLayout(
     }
   }
 
-  // Force-directed layout stub
-  // TODO: Implement proper force-directed layout
-  return {
-    ops: [],
-    summary: 'Force-directed layout not yet implemented',
-  }
+  // 'force' is not implemented as a distinct algorithm; fall back to the
+  // deterministic grid so callers always get a usable result. For real
+  // hierarchical layout use runElkLayout (lib/layout/elk.ts).
+  return runLayout(diagram, 'grid', scopeIds)
 }

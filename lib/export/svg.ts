@@ -1,13 +1,34 @@
 import { Diagram } from '@/lib/model/diagram'
 import { downloadBlob } from '@/lib/export/download'
+import { nodePrimitive, primitiveToSvg } from '@/lib/render/shapes'
+import { edgeAnchors, edgePath, edgeMidpoint, nodeBox } from '@/lib/render/edges'
 
-// Export diagram as SVG
-export function exportSVG(diagram: Diagram): string {
+// Escape text for safe inclusion in SVG/XML. Without this, labels containing
+// `<`, `>`, `&`, or quotes would produce invalid markup.
+export function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+}
+
+export interface DiagramBounds {
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+  width: number
+  height: number
+}
+
+// Bounding box of all nodes plus padding. Returns a default frame when empty.
+export function diagramBounds(diagram: Diagram, padding = 50): DiagramBounds {
   if (diagram.nodes.length === 0) {
-    return '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">\n  <rect width="800" height="600" fill="white"/>\n</svg>'
+    return { minX: 0, minY: 0, maxX: 800, maxY: 600, width: 800, height: 600 }
   }
 
-  // Calculate bounds
   let minX = Infinity
   let minY = Infinity
   let maxX = -Infinity
@@ -20,91 +41,84 @@ export function exportSVG(diagram: Diagram): string {
     maxY = Math.max(maxY, node.y + node.h)
   })
 
-  // Add padding
-  const padding = 50
-  const width = maxX - minX + padding * 2
-  const height = maxY - minY + padding * 2
-  const offsetX = -minX + padding
-  const offsetY = -minY + padding
+  minX -= padding
+  minY -= padding
+  maxX += padding
+  maxY += padding
 
-  // Start SVG
+  return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY }
+}
+
+// Export diagram as SVG
+export function exportSVG(diagram: Diagram): string {
+  if (diagram.nodes.length === 0) {
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">\n  <rect width="800" height="600" fill="white"/>\n</svg>'
+  }
+
+  const { minX, minY, width, height } = diagramBounds(diagram)
+  const offsetX = -minX
+  const offsetY = -minY
+
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">\n`
-  
-  // Add background
   svg += `  <rect width="${width}" height="${height}" fill="white"/>\n`
+
+  // Arrowhead markers
+  svg += `  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#7b756b"/>
+    </marker>
+    <marker id="arrowhead-start" markerWidth="10" markerHeight="10" refX="1" refY="3" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3, 0 6" fill="#7b756b"/>
+    </marker>
+  </defs>\n`
 
   // Render edges first (so they're below nodes)
   diagram.edges.forEach((edge) => {
     const fromNode = diagram.nodes.find((n) => n.id === edge.from.nodeId)
     const toNode = diagram.nodes.find((n) => n.id === edge.to.nodeId)
-    
     if (!fromNode || !toNode) return
 
-    const x1 = fromNode.x + fromNode.w / 2 + offsetX
-    const y1 = fromNode.y + fromNode.h / 2 + offsetY
-    const x2 = toNode.x + toNode.w / 2 + offsetX
-    const y2 = toNode.y + toNode.h / 2 + offsetY
+    const from = nodeBox(fromNode)
+    const to = nodeBox(toNode)
+    const anchors = edgeAnchors(
+      { ...from, x: from.x + offsetX, y: from.y + offsetY },
+      { ...to, x: to.x + offsetX, y: to.y + offsetY }
+    )
+    const d = edgePath(anchors, edge.routing)
 
     const stroke = edge.style?.stroke || '#000'
     const strokeWidth = edge.style?.strokeWidth || 2
+    const dash = edge.style?.strokeDasharray ? ` stroke-dasharray="${edge.style.strokeDasharray}"` : ''
+    const markerEnd = edge.arrowEnd !== false ? ' marker-end="url(#arrowhead)"' : ''
+    const markerStart = edge.arrowStart === true ? ' marker-start="url(#arrowhead-start)"' : ''
 
-    if (edge.points && edge.points.length > 0) {
-      // Draw path with points
-      let pathData = `M ${x1} ${y1}`
-      edge.points.forEach((p) => {
-        pathData += ` L ${p.x + offsetX} ${p.y + offsetY}`
-      })
-      pathData += ` L ${x2} ${y2}`
-      svg += `  <path d="${pathData}" stroke="${stroke}" stroke-width="${strokeWidth}" fill="none" marker-end="url(#arrowhead)"/>\n`
-    } else {
-      // Direct line
-      svg += `  <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${stroke}" stroke-width="${strokeWidth}" marker-end="url(#arrowhead)"/>\n`
-    }
+    svg += `  <path d="${d}" stroke="${stroke}" stroke-width="${strokeWidth}" fill="none"${dash}${markerStart}${markerEnd}/>\n`
 
-    // Add label if present
     if (edge.label) {
-      const midX = (x1 + x2) / 2
-      const midY = (y1 + y2) / 2
-      svg += `  <text x="${midX}" y="${midY}" text-anchor="middle" fill="${stroke}" font-size="12">${edge.label}</text>\n`
+      const mid = edgeMidpoint(anchors)
+      svg += `  <text x="${mid.x}" y="${mid.y - 4}" text-anchor="middle" fill="${stroke}" font-size="12">${escapeXml(edge.label)}</text>\n`
     }
   })
 
-  // Define arrowhead marker
-  svg += `  <defs>
-    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
-      <polygon points="0 0, 10 3, 0 6" fill="#000"/>
-    </marker>
-  </defs>\n`
-
   // Render nodes
   diagram.nodes.forEach((node) => {
-    const x = node.x + offsetX
-    const y = node.y + offsetY
-    const fill = node.style?.fill || '#fff'
+    const fill = node.type === 'text' ? 'transparent' : (node.style?.fill || '#fff')
     const stroke = node.style?.stroke || '#000'
-    const strokeWidth = node.style?.strokeWidth || 2
+    const strokeWidth = node.style?.strokeWidth ?? 2
+    const opacity = node.style?.opacity ?? 1
     const fontSize = node.style?.fontSize || 14
+    const fontFamily = node.style?.fontFamily || 'sans-serif'
+    const fontWeight = node.style?.fontWeight ? ` font-weight="${escapeXml(node.style.fontWeight)}"` : ''
 
-    if (node.type === 'rect') {
-      svg += `  <rect x="${x}" y="${y}" width="${node.w}" height="${node.h}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"/>\n`
-    } else if (node.type === 'ellipse') {
-      const cx = x + node.w / 2
-      const cy = y + node.h / 2
-      const rx = node.w / 2
-      const ry = node.h / 2
-      svg += `  <ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"/>\n`
-    } else if (node.type === 'diamond') {
-      const cx = x + node.w / 2
-      const cy = y + node.h / 2
-      const points = `${cx},${y} ${x + node.w},${cy} ${cx},${y + node.h} ${x},${cy}`
-      svg += `  <polygon points="${points}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"/>\n`
-    }
+    const prim = nodePrimitive({ ...node, x: node.x + offsetX, y: node.y + offsetY })
+    const attrs = `fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" opacity="${opacity}"`
+    const shapeMarkup = primitiveToSvg(prim, attrs)
+    if (shapeMarkup) svg += `  ${shapeMarkup}\n`
 
-    // Add text
     if (node.text) {
-      const textX = x + node.w / 2
-      const textY = y + node.h / 2
-      svg += `  <text x="${textX}" y="${textY}" text-anchor="middle" dominant-baseline="middle" fill="#000" font-size="${fontSize}">${node.text}</text>\n`
+      const textX = node.x + offsetX + node.w / 2
+      const textY = node.y + offsetY + node.h / 2
+      svg += `  <text x="${textX}" y="${textY}" text-anchor="middle" dominant-baseline="middle" fill="#000" font-size="${fontSize}" font-family="${escapeXml(fontFamily)}"${fontWeight}>${escapeXml(node.text)}</text>\n`
     }
   })
 
