@@ -73,7 +73,7 @@ test.describe('F. inspector & styling', () => {
     await expect(page.locator('[data-edge-id] text')).toHaveText('yes')
 
     // Route -> orthogonal produces an elbow path (more L segments)
-    await page.locator('[data-testid="edge-inspector"] select').selectOption('orthogonal')
+    await page.locator('[data-testid="edge-inspector"] select').first().selectOption('orthogonal')
     const d = await page.locator('[data-edge-id] path').first().getAttribute('d')
     expect((d!.match(/L/g) || []).length).toBeGreaterThanOrEqual(3)
 

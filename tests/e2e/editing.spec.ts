@@ -8,7 +8,8 @@ test.describe('E. editing operations', () => {
     await page.locator('[data-node-id]').first().click()
     await page.keyboard.press('Control+c')
     await page.keyboard.press('Control+v')
-    expect(await nodeCount(page)).toBe(2)
+    // Paste reads the system clipboard asynchronously, so retry on the count.
+    await expect(page.locator('[data-node-id]')).toHaveCount(2)
   })
 
   test('duplicate (Ctrl+D) clones the selection', async ({ page }) => {
