@@ -317,6 +317,52 @@ export function invertDiff(diagramBefore: Diagram, diff: Diff): Diff {
   }
 }
 
+// Structural diff between two diagram snapshots. Used to coalesce a whole
+// interaction (a drag, a resize, a slider sweep) into a single forward diff so
+// it becomes one undo step instead of one-per-frame.
+export function diffDiagrams(before: Diagram, after: Diagram): Diff {
+  const ops: Op[] = []
+  const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+
+  const beforeNodes = new Map(before.nodes.map((n) => [n.id, n]))
+  const afterNodes = new Map(after.nodes.map((n) => [n.id, n]))
+
+  for (const [id, node] of afterNodes) {
+    const prev = beforeNodes.get(id)
+    if (!prev) {
+      ops.push({ type: 'addNode', node })
+    } else if (!eq(prev, node)) {
+      const { id: _omit, ...patch } = node
+      ops.push({ type: 'updateNode', id, patch })
+    }
+  }
+  for (const id of beforeNodes.keys()) {
+    if (!afterNodes.has(id)) ops.push({ type: 'removeNode', id })
+  }
+
+  const beforeEdges = new Map(before.edges.map((e) => [e.id, e]))
+  const afterEdges = new Map(after.edges.map((e) => [e.id, e]))
+
+  for (const [id, edge] of afterEdges) {
+    const prev = beforeEdges.get(id)
+    if (!prev) {
+      ops.push({ type: 'addEdge', edge })
+    } else if (!eq(prev, edge)) {
+      const { id: _omit, ...patch } = edge
+      ops.push({ type: 'updateEdge', id, patch })
+    }
+  }
+  for (const id of beforeEdges.keys()) {
+    if (!afterEdges.has(id)) ops.push({ type: 'removeEdge', id })
+  }
+
+  if (!eq(before.meta, after.meta)) {
+    ops.push({ type: 'setMeta', patch: after.meta })
+  }
+
+  return { ops }
+}
+
 // Validate a diff
 export function validateDiff(diagram: Diagram, diff: Diff): string[] {
   const errors: string[] = []

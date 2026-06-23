@@ -5,6 +5,7 @@ export const StyleSchema = z.object({
   fill: z.string().optional(),
   stroke: z.string().optional(),
   strokeWidth: z.number().optional(),
+  strokeDasharray: z.string().optional(),
   fontSize: z.number().optional(),
   fontFamily: z.string().optional(),
   fontWeight: z.string().optional(),
@@ -13,10 +14,33 @@ export const StyleSchema = z.object({
 
 export type Style = z.infer<typeof StyleSchema>
 
+// Visual shape kinds the renderer can draw faithfully. `type` is kept for
+// backward compatibility; `shapeKind` (when present) drives rendering and lets
+// the palette advertise only shapes we can actually create.
+export const ShapeKindSchema = z.enum([
+  'rect',
+  'rounded',
+  'ellipse',
+  'diamond',
+  'parallelogram',
+  'hexagon',
+  'triangle',
+  'cylinder',
+  'cloud',
+  'document',
+  'trapezoid',
+  'chevron',
+  'note',
+  'text',
+])
+
+export type ShapeKind = z.infer<typeof ShapeKindSchema>
+
 // Node schema
 export const NodeSchema = z.object({
   id: z.string(),
   type: z.enum(['rect', 'ellipse', 'diamond', 'text']),
+  shapeKind: ShapeKindSchema.optional(),
   x: z.number(),
   y: z.number(),
   w: z.number(),
@@ -45,6 +69,11 @@ export const EdgeSchema = z.object({
   points: z.array(z.object({ x: z.number(), y: z.number() })).optional(),
   style: StyleSchema.optional(),
   label: z.string().optional(),
+  // How the edge is drawn between endpoints.
+  routing: z.enum(['straight', 'orthogonal', 'curved']).optional(),
+  // Arrowheads. Default behaviour is an end arrow only.
+  arrowStart: z.boolean().optional(),
+  arrowEnd: z.boolean().optional(),
 })
 
 export type Edge = z.infer<typeof EdgeSchema>
