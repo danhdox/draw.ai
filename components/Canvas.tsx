@@ -1,15 +1,12 @@
 'use client'
 
-import { useRef, useState, useCallback, useEffect } from 'react'
+import { useRef, useState, useCallback, useEffect, useMemo } from 'react'
 import { useDiagramStore } from '@/lib/store/useDiagramStore'
-import { generateId } from '@/lib/model/diagram'
 import { Node as DiagramNode } from '@/lib/model/diagram'
+import { nodePrimitive } from '@/lib/render/shapes'
+import { edgeAnchors, edgePath, edgeMidpoint, nodeBox } from '@/lib/render/edges'
 
-interface CanvasProps {
-  onAddNode?: (type: DiagramNode['type']) => void
-}
-
-export function Canvas({ onAddNode }: CanvasProps) {
+export function Canvas() {
   const canvasRef = useRef<SVGSVGElement>(null)
   const [viewBox, setViewBox] = useState({ x: 0, y: 0, width: 1200, height: 800 })
   const [isPanning, setIsPanning] = useState(false)
@@ -18,22 +15,41 @@ export function Canvas({ onAddNode }: CanvasProps) {
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
   const [resizingNode, setResizingNode] = useState<{ id: string; handle: string } | null>(null)
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null)
+  const [pointerPos, setPointerPos] = useState<{ x: number; y: number } | null>(null)
+  const [connectDragging, setConnectDragging] = useState(false)
+
+  // Active pointers (for pinch-zoom on touch).
+  const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map())
+  const pinchRef = useRef<{ dist: number } | null>(null)
+  // Pointer captured once a drag/resize actually moves (capturing on pointerdown
+  // would suppress click/dblclick).
+  const capturedPointer = useRef<number | null>(null)
 
   const {
     diagram,
     selectedNodeIds,
     selectedEdgeIds,
-    applyDiffWithHistory,
     selectNodes,
     selectEdges,
     clearSelection,
+    tool,
+    setTool,
     isConnecting,
     connectingFrom,
+    startConnecting,
     finishConnecting,
     cancelConnecting,
+    beginInteraction,
+    updateLive,
+    commitInteraction,
   } = useDiagramStore()
 
-  // Convert screen coordinates to SVG coordinates
+  // Render back-to-front by z-order; ties keep insertion order.
+  const orderedNodes = useMemo(
+    () => diagram.nodes.map((n, i) => ({ n, i })).sort((a, b) => (a.n.zIndex ?? 0) - (b.n.zIndex ?? 0) || a.i - b.i).map((e) => e.n),
+    [diagram.nodes]
+  )
+
   const screenToSVG = useCallback((screenX: number, screenY: number) => {
     if (!canvasRef.current) return { x: 0, y: 0 }
     const ctm = canvasRef.current.getScreenCTM()
@@ -45,7 +61,6 @@ export function Canvas({ onAddNode }: CanvasProps) {
     return { x: svgPt.x, y: svgPt.y }
   }, [])
 
-  // Snap to grid
   const snapToGrid = useCallback((x: number, y: number) => {
     if (!diagram.meta.snap) return { x, y }
     const gridSize = diagram.meta.gridSize
@@ -55,255 +70,232 @@ export function Canvas({ onAddNode }: CanvasProps) {
     }
   }, [diagram.meta.snap, diagram.meta.gridSize])
 
-  // Handle mouse down on canvas
-  const handleCanvasMouseDown = (e: React.MouseEvent<SVGSVGElement>) => {
-    if (e.button !== 0) return // Only left click
+  const zoomAround = useCallback((factor: number) => {
+    setViewBox((prev) => {
+      const newWidth = prev.width * factor
+      const newHeight = prev.height * factor
+      return {
+        x: prev.x - (newWidth - prev.width) / 2,
+        y: prev.y - (newHeight - prev.height) / 2,
+        width: newWidth,
+        height: newHeight,
+      }
+    })
+  }, [])
+
+  const handleCanvasPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
 
     const target = e.target as SVGElement
     if (target === canvasRef.current || target.classList.contains('canvas-bg')) {
-      // Start panning
+      if (connectingFrom) cancelConnecting()
+      // Two fingers on empty canvas → start a pinch, not a pan.
+      if (pointersRef.current.size >= 2) {
+        const pts = [...pointersRef.current.values()]
+        pinchRef.current = { dist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) }
+        setIsPanning(false)
+        return
+      }
       setIsPanning(true)
       setPanStart({ x: e.clientX, y: e.clientY })
       clearSelection()
     }
   }
 
-  // Handle mouse move
-  const handleMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+  const handlePointerMove = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
+    if (pointersRef.current.has(e.pointerId)) {
+      pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    }
+
+    // Pinch-zoom when two pointers are down.
+    if (pointersRef.current.size >= 2 && pinchRef.current) {
+      const pts = [...pointersRef.current.values()]
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
+      if (dist > 0) {
+        zoomAround(pinchRef.current.dist / dist)
+        pinchRef.current.dist = dist
+      }
+      return
+    }
+
+    if (isConnecting && connectingFrom) {
+      setPointerPos(screenToSVG(e.clientX, e.clientY))
+    }
+
+    // Capture the pointer the moment a drag/resize starts moving, so it keeps
+    // tracking even over overlapping panels or outside the window.
+    if ((draggedNodeId || resizingNode) && capturedPointer.current === null && canvasRef.current) {
+      try {
+        canvasRef.current.setPointerCapture(e.pointerId)
+        capturedPointer.current = e.pointerId
+      } catch {
+        /* capture is best-effort */
+      }
+    }
+
     if (isPanning) {
       const dx = e.clientX - panStart.x
       const dy = e.clientY - panStart.y
-      setViewBox((prev) => ({
-        ...prev,
-        x: prev.x - dx,
-        y: prev.y - dy,
-      }))
+      setViewBox((prev) => ({ ...prev, x: prev.x - dx, y: prev.y - dy }))
       setPanStart({ x: e.clientX, y: e.clientY })
     } else if (draggedNodeId) {
       const svgCoords = screenToSVG(e.clientX, e.clientY)
       const snapped = snapToGrid(svgCoords.x - dragOffset.x, svgCoords.y - dragOffset.y)
-      
-      applyDiffWithHistory({
-        ops: [{
-          type: 'updateNode',
-          id: draggedNodeId,
-          patch: { x: snapped.x, y: snapped.y },
-        }],
-        summary: 'Move node',
-      })
+      updateLive({ ops: [{ type: 'updateNode', id: draggedNodeId, patch: { x: snapped.x, y: snapped.y } }] })
     } else if (resizingNode) {
-      const node = diagram.nodes.find(n => n.id === resizingNode.id)
+      const node = diagram.nodes.find((n) => n.id === resizingNode.id)
       if (!node) return
-
       const svgCoords = screenToSVG(e.clientX, e.clientY)
-      
       let newW = node.w
       let newH = node.h
       let newX = node.x
       let newY = node.y
-
-      if (resizingNode.handle.includes('e')) {
-        newW = Math.max(50, svgCoords.x - node.x)
-      }
+      if (resizingNode.handle.includes('e')) newW = Math.max(50, svgCoords.x - node.x)
       if (resizingNode.handle.includes('w')) {
         newW = Math.max(50, node.w + (node.x - svgCoords.x))
         newX = svgCoords.x
       }
-      if (resizingNode.handle.includes('s')) {
-        newH = Math.max(30, svgCoords.y - node.y)
-      }
+      if (resizingNode.handle.includes('s')) newH = Math.max(30, svgCoords.y - node.y)
       if (resizingNode.handle.includes('n')) {
         newH = Math.max(30, node.h + (node.y - svgCoords.y))
         newY = svgCoords.y
       }
-
-      applyDiffWithHistory({
-        ops: [{
-          type: 'updateNode',
-          id: resizingNode.id,
-          patch: { x: newX, y: newY, w: newW, h: newH },
-        }],
-        summary: 'Resize node',
-      })
+      updateLive({ ops: [{ type: 'updateNode', id: resizingNode.id, patch: { x: newX, y: newY, w: newW, h: newH } }] })
     }
-  }, [isPanning, panStart, draggedNodeId, dragOffset, resizingNode, diagram.nodes, applyDiffWithHistory, snapToGrid, screenToSVG])
+  }, [isConnecting, connectingFrom, isPanning, panStart, draggedNodeId, dragOffset, resizingNode, diagram.nodes, updateLive, snapToGrid, screenToSVG, zoomAround])
 
-  // Handle mouse up
-  const handleMouseUp = useCallback(() => {
+  const endPointer = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
+    pointersRef.current.delete(e.pointerId)
+    if (pointersRef.current.size < 2) pinchRef.current = null
+    if (capturedPointer.current !== null) {
+      canvasRef.current?.releasePointerCapture?.(capturedPointer.current)
+      capturedPointer.current = null
+    }
+
+    if (draggedNodeId) commitInteraction('Move node')
+    if (resizingNode) commitInteraction('Resize node')
+
     setIsPanning(false)
     setDraggedNodeId(null)
     setResizingNode(null)
-  }, [])
+    if (connectDragging) {
+      cancelConnecting()
+      setConnectDragging(false)
+      setPointerPos(null)
+    }
+  }, [draggedNodeId, resizingNode, connectDragging, commitInteraction, cancelConnecting])
 
-  // Handle node click
-  const handleNodeMouseDown = (e: React.MouseEvent, nodeId: string) => {
+  const handleNodePointerDown = (e: React.PointerEvent, nodeId: string) => {
     e.stopPropagation()
-    
-    const node = diagram.nodes.find(n => n.id === nodeId)
+    const node = diagram.nodes.find((n) => n.id === nodeId)
     if (!node) return
 
-    if (e.shiftKey) {
-      selectNodes([nodeId], true)
-    } else if (!selectedNodeIds.has(nodeId)) {
-      selectNodes([nodeId])
+    if (tool === 'connect') {
+      if (!connectingFrom) {
+        startConnecting(nodeId)
+        setPointerPos({ x: node.x + node.w / 2, y: node.y + node.h / 2 })
+      } else {
+        finishConnecting(nodeId)
+        setPointerPos(null)
+      }
+      return
     }
 
+    if (e.shiftKey) selectNodes([nodeId], true)
+    else if (!selectedNodeIds.has(nodeId)) selectNodes([nodeId])
+
     const svgCoords = screenToSVG(e.clientX, e.clientY)
+    beginInteraction()
     setDraggedNodeId(nodeId)
-    setDragOffset({
-      x: svgCoords.x - node.x,
-      y: svgCoords.y - node.y,
-    })
+    setDragOffset({ x: svgCoords.x - node.x, y: svgCoords.y - node.y })
   }
 
-  // Handle node double click to edit text
-  const handleNodeDoubleClick = (e: React.MouseEvent, nodeId: string) => {
+  const handleNodePointerUp = (e: React.PointerEvent, nodeId: string) => {
+    if (connectDragging && connectingFrom) {
+      e.stopPropagation()
+      finishConnecting(nodeId)
+      setConnectDragging(false)
+      setPointerPos(null)
+    }
+  }
+
+  const handleConnectHandlePointerDown = (e: React.PointerEvent, nodeId: string) => {
     e.stopPropagation()
-    setEditingNodeId(nodeId)
+    const node = diagram.nodes.find((n) => n.id === nodeId)
+    if (!node) return
+    startConnecting(nodeId)
+    setConnectDragging(true)
+    // Intentionally NOT capturing the pointer: the target node's own pointerup
+    // must fire to complete the connection.
+    setPointerPos({ x: node.x + node.w / 2, y: node.y + node.h / 2 })
   }
 
-  // Handle text change
-  const handleTextChange = (nodeId: string, text: string) => {
-    applyDiffWithHistory({
-      ops: [{
-        type: 'updateNode',
-        id: nodeId,
-        patch: { text },
-      }],
-      summary: 'Edit text',
-    })
-  }
-
-  // Handle resize handle mouse down
-  const handleResizeHandleMouseDown = (e: React.MouseEvent, nodeId: string, handle: string) => {
+  const handleResizeHandlePointerDown = (e: React.PointerEvent, nodeId: string, handle: string) => {
     e.stopPropagation()
+    beginInteraction()
     setResizingNode({ id: nodeId, handle })
   }
 
-  // Handle node connection
-  const handleNodeConnectionClick = (e: React.MouseEvent, nodeId: string) => {
+  const handleNodeDoubleClick = (e: React.MouseEvent, nodeId: string) => {
     e.stopPropagation()
-    if (isConnecting && connectingFrom) {
-      finishConnecting(nodeId)
-    }
+    if (tool === 'connect') return
+    beginInteraction()
+    setEditingNodeId(nodeId)
   }
 
-  // Zoom
+  const handleTextChange = (nodeId: string, text: string) => {
+    updateLive({ ops: [{ type: 'updateNode', id: nodeId, patch: { text } }] })
+  }
+
+  const exitEditing = useCallback(() => {
+    setEditingNodeId(null)
+    commitInteraction('Edit text')
+  }, [commitInteraction])
+
   const handleWheel = (e: React.WheelEvent<SVGSVGElement>) => {
-    e.preventDefault()
-    const delta = e.deltaY > 0 ? 1.1 : 0.9
-    setViewBox((prev) => {
-      const newWidth = prev.width * delta
-      const newHeight = prev.height * delta
-      const dx = (newWidth - prev.width) / 2
-      const dy = (newHeight - prev.height) / 2
-      return {
-        x: prev.x - dx,
-        y: prev.y - dy,
-        width: newWidth,
-        height: newHeight,
-      }
-    })
+    zoomAround(e.deltaY > 0 ? 1.1 : 0.9)
   }
 
-  // Render node shape
-  const renderNodeShape = (node: DiagramNode) => {
-    const fill = node.style?.fill || '#ffffff'
-    const stroke = node.style?.stroke || '#000000'
-    const strokeWidth = node.style?.strokeWidth || 2
-
-    if (node.type === 'rect') {
-      return (
-        <rect
-          x={node.x}
-          y={node.y}
-          width={node.w}
-          height={node.h}
-          rx={14}
-          fill={fill}
-          stroke={stroke}
-          strokeWidth={strokeWidth}
-        />
-      )
-    } else if (node.type === 'ellipse') {
-      return (
-        <ellipse
-          cx={node.x + node.w / 2}
-          cy={node.y + node.h / 2}
-          rx={node.w / 2}
-          ry={node.h / 2}
-          fill={fill}
-          stroke={stroke}
-          strokeWidth={strokeWidth}
-        />
-      )
-    } else if (node.type === 'diamond') {
-      const cx = node.x + node.w / 2
-      const cy = node.y + node.h / 2
-      const points = `${cx},${node.y} ${node.x + node.w},${cy} ${cx},${node.y + node.h} ${node.x},${cy}`
-      return (
-        <polygon
-          points={points}
-          fill={fill}
-          stroke={stroke}
-          strokeWidth={strokeWidth}
-        />
-      )
-    } else if (node.type === 'text') {
-      return (
-        <rect
-          x={node.x}
-          y={node.y}
-          width={node.w}
-          height={node.h}
-          fill="transparent"
-          stroke={stroke}
-          strokeWidth={strokeWidth}
-          strokeDasharray="5,5"
-        />
-      )
-    }
-  }
-
-  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (isConnecting) {
+        if (editingNodeId) {
+          exitEditing()
+        } else if (connectingFrom || tool === 'connect') {
           cancelConnecting()
+          setTool('select')
+          setConnectDragging(false)
+          setPointerPos(null)
         } else {
           clearSelection()
-          setEditingNodeId(null)
         }
       } else if (e.key === 'Enter' && editingNodeId) {
-        setEditingNodeId(null)
+        exitEditing()
       }
     }
-
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isConnecting, cancelConnecting, clearSelection, editingNodeId])
+  }, [tool, connectingFrom, cancelConnecting, setTool, clearSelection, editingNodeId, exitEditing])
+
+  const cursor = tool === 'connect' ? 'crosshair' : 'default'
 
   return (
     <svg
       ref={canvasRef}
       data-testid="diagram-canvas"
+      data-tool={tool}
       className="h-full w-full bg-[#fbfaf7]"
+      style={{ cursor, touchAction: 'none' }}
       viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`}
-      onMouseDown={handleCanvasMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
+      onPointerDown={handleCanvasPointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={endPointer}
+      onPointerCancel={endPointer}
       onWheel={handleWheel}
     >
-      {/* Grid */}
       {diagram.meta.gridSize && (
         <defs>
-          <pattern
-            id="grid"
-            width={diagram.meta.gridSize}
-            height={diagram.meta.gridSize}
-            patternUnits="userSpaceOnUse"
-          >
+          <pattern id="grid" width={diagram.meta.gridSize} height={diagram.meta.gridSize} patternUnits="userSpaceOnUse">
             <circle cx="1" cy="1" r="1" fill="#ded8ce" opacity="0.55" />
           </pattern>
         </defs>
@@ -314,73 +306,75 @@ export function Canvas({ onAddNode }: CanvasProps) {
         y={viewBox.y}
         width={viewBox.width}
         height={viewBox.height}
-          fill={diagram.meta.gridSize ? 'url(#grid)' : '#fbfaf7'}
+        fill={diagram.meta.gridSize ? 'url(#grid)' : '#fbfaf7'}
       />
+
+      <defs>
+        <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+          <polygon points="0 0, 10 3, 0 6" fill="#7b756b" />
+        </marker>
+        <marker id="arrowhead-start" markerWidth="10" markerHeight="10" refX="1" refY="3" orient="auto-start-reverse">
+          <polygon points="0 0, 10 3, 0 6" fill="#7b756b" />
+        </marker>
+        <marker id="arrowhead-sel" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+          <polygon points="0 0, 10 3, 0 6" fill="#3b82f6" />
+        </marker>
+        <marker id="arrowhead-start-sel" markerWidth="10" markerHeight="10" refX="1" refY="3" orient="auto-start-reverse">
+          <polygon points="0 0, 10 3, 0 6" fill="#3b82f6" />
+        </marker>
+      </defs>
 
       {/* Edges */}
       {diagram.edges.map((edge) => {
-        const fromNode = diagram.nodes.find(n => n.id === edge.from.nodeId)
-        const toNode = diagram.nodes.find(n => n.id === edge.to.nodeId)
+        const fromNode = diagram.nodes.find((n) => n.id === edge.from.nodeId)
+        const toNode = diagram.nodes.find((n) => n.id === edge.to.nodeId)
         if (!fromNode || !toNode) return null
 
-        const x1 = fromNode.x + fromNode.w / 2
-        const y1 = fromNode.y + fromNode.h / 2
-        const x2 = toNode.x + toNode.w / 2
-        const y2 = toNode.y + toNode.h / 2
+        const anchors = edgeAnchors(nodeBox(fromNode), nodeBox(toNode))
+        const d = edgePath(anchors, edge.routing)
+        const mid = edgeMidpoint(anchors)
 
         const isSelected = selectedEdgeIds.has(edge.id)
-        const stroke = edge.style?.stroke || '#000000'
-        const strokeWidth = edge.style?.strokeWidth || 2
+        const stroke = isSelected ? '#3b82f6' : (edge.style?.stroke || '#000000')
+        const strokeWidth = (edge.style?.strokeWidth || 2) + (isSelected ? 1 : 0)
+        const showEnd = edge.arrowEnd !== false
+        const showStart = edge.arrowStart === true
+        const dash = edge.style?.strokeDasharray
 
         return (
-          <g key={edge.id}>
-            <line
-              x1={x1}
-              y1={y1}
-              x2={x2}
-              y2={y2}
-              stroke={isSelected ? '#3b82f6' : stroke}
-              strokeWidth={isSelected ? strokeWidth + 2 : strokeWidth}
-              markerEnd="url(#arrowhead)"
+          <g key={edge.id} data-edge-id={edge.id}>
+            <path
+              d={d}
+              fill="none"
+              stroke="transparent"
+              strokeWidth={Math.max(12, strokeWidth + 10)}
+              style={{ cursor: 'pointer' }}
               onClick={(e) => {
                 e.stopPropagation()
                 selectEdges([edge.id], e.shiftKey)
               }}
-              style={{ cursor: 'pointer' }}
+            />
+            <path
+              d={d}
+              fill="none"
+              stroke={stroke}
+              strokeWidth={strokeWidth}
+              strokeDasharray={dash}
+              markerEnd={showEnd ? `url(#${isSelected ? 'arrowhead-sel' : 'arrowhead'})` : undefined}
+              markerStart={showStart ? `url(#${isSelected ? 'arrowhead-start-sel' : 'arrowhead-start'})` : undefined}
+              pointerEvents="none"
             />
             {edge.label && (
-              <text
-                x={(x1 + x2) / 2}
-                y={(y1 + y2) / 2}
-                textAnchor="middle"
-                dominantBaseline="middle"
-                fill={stroke}
-                fontSize="12"
-                pointerEvents="none"
-              >
-                {edge.label}
+              <text x={mid.x} y={mid.y} textAnchor="middle" dominantBaseline="middle" fill={stroke} fontSize="12" pointerEvents="none">
+                <tspan dx="0" dy="-4" className="select-none">{edge.label}</tspan>
               </text>
             )}
           </g>
         )
       })}
 
-      {/* Arrow marker */}
-      <defs>
-        <marker
-          id="arrowhead"
-          markerWidth="10"
-          markerHeight="10"
-          refX="9"
-          refY="3"
-          orient="auto"
-        >
-          <polygon points="0 0, 10 3, 0 6" fill="#7b756b" />
-        </marker>
-      </defs>
-
       {/* Nodes */}
-      {diagram.nodes.map((node) => {
+      {orderedNodes.map((node) => {
         const isSelected = selectedNodeIds.has(node.id)
         const isEditing = editingNodeId === node.id
 
@@ -389,14 +383,14 @@ export function Canvas({ onAddNode }: CanvasProps) {
             key={node.id}
             data-node-id={node.id}
             data-node-type={node.type}
-            onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
+            data-shape-kind={node.shapeKind ?? node.type}
+            onPointerDown={(e) => handleNodePointerDown(e, node.id)}
+            onPointerUp={(e) => handleNodePointerUp(e, node.id)}
             onDoubleClick={(e) => handleNodeDoubleClick(e, node.id)}
-            onClick={(e) => handleNodeConnectionClick(e, node.id)}
-            style={{ cursor: 'move' }}
+            style={{ cursor: tool === 'connect' ? 'crosshair' : 'move' }}
           >
-            {renderNodeShape(node)}
-            
-            {/* Text */}
+            <NodeShape node={node} />
+
             {!isEditing && node.text && (
               <text
                 x={node.x + node.w / 2}
@@ -405,35 +399,30 @@ export function Canvas({ onAddNode }: CanvasProps) {
                 dominantBaseline="middle"
                 fontSize={node.style?.fontSize || 14}
                 fontFamily={node.style?.fontFamily || 'Geist, ui-sans-serif'}
+                fontWeight={node.style?.fontWeight}
                 fill="#26221d"
+                opacity={node.style?.opacity ?? 1}
                 pointerEvents="none"
               >
                 {node.text}
               </text>
             )}
 
-            {/* Editing text */}
             {isEditing && (
-              <foreignObject
-                x={node.x}
-                y={node.y}
-                width={node.w}
-                height={node.h}
-              >
+              <foreignObject x={node.x} y={node.y} width={node.w} height={node.h}>
                 <input
                   autoFocus
                   className="w-full h-full text-center bg-transparent border-none outline-none"
                   value={node.text || ''}
                   onChange={(e) => handleTextChange(node.id, e.target.value)}
-                  onBlur={() => setEditingNodeId(null)}
+                  onBlur={exitEditing}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') setEditingNodeId(null)
+                    if (e.key === 'Enter') exitEditing()
                   }}
                 />
               </foreignObject>
             )}
 
-            {/* Selection and resize handles */}
             {isSelected && (
               <>
                 <rect
@@ -446,7 +435,6 @@ export function Canvas({ onAddNode }: CanvasProps) {
                   strokeWidth="2"
                   pointerEvents="none"
                 />
-                {/* Resize handles */}
                 {['nw', 'ne', 'se', 'sw'].map((handle) => {
                   const x = handle.includes('e') ? node.x + node.w : node.x
                   const y = handle.includes('s') ? node.y + node.h : node.y
@@ -461,34 +449,69 @@ export function Canvas({ onAddNode }: CanvasProps) {
                       stroke="#fff"
                       strokeWidth="1"
                       style={{ cursor: `${handle}-resize` }}
-                      onMouseDown={(e) => handleResizeHandleMouseDown(e, node.id, handle)}
+                      onPointerDown={(e) => handleResizeHandlePointerDown(e, node.id, handle)}
                     />
                   )
                 })}
+                <circle
+                  data-testid={`connect-handle-${node.id}`}
+                  cx={node.x + node.w}
+                  cy={node.y + node.h / 2}
+                  r="5"
+                  fill="#16a34a"
+                  stroke="#fff"
+                  strokeWidth="1.5"
+                  style={{ cursor: 'crosshair' }}
+                  onPointerDown={(e) => handleConnectHandlePointerDown(e, node.id)}
+                />
               </>
             )}
           </g>
         )
       })}
 
-      {/* Connecting line */}
-      {isConnecting && connectingFrom && (() => {
-        const fromNode = diagram.nodes.find(n => n.id === connectingFrom.nodeId)
+      {/* Connecting preview line */}
+      {connectingFrom && pointerPos && (() => {
+        const fromNode = diagram.nodes.find((n) => n.id === connectingFrom.nodeId)
         if (!fromNode) return null
-        
+        const start = edgeAnchors(nodeBox(fromNode), { x: pointerPos.x, y: pointerPos.y, w: 1, h: 1 })
         return (
           <line
-            x1={fromNode.x + fromNode.w / 2}
-            y1={fromNode.y + fromNode.h / 2}
-            x2={viewBox.x + viewBox.width / 2}
-            y2={viewBox.y + viewBox.height / 2}
-            stroke="#3b82f6"
+            x1={start.x1}
+            y1={start.y1}
+            x2={pointerPos.x}
+            y2={pointerPos.y}
+            stroke="#16a34a"
             strokeWidth="2"
             strokeDasharray="5,5"
+            markerEnd="url(#arrowhead)"
             pointerEvents="none"
           />
         )
       })()}
     </svg>
   )
+}
+
+function NodeShape({ node }: { node: DiagramNode }) {
+  const prim = nodePrimitive(node)
+  const fill = node.type === 'text' ? 'transparent' : (node.style?.fill || '#ffffff')
+  const stroke = node.style?.stroke || '#000000'
+  const strokeWidth = node.style?.strokeWidth ?? 2
+  const opacity = node.style?.opacity ?? 1
+
+  const common = { fill, stroke, strokeWidth, opacity }
+
+  switch (prim.kind) {
+    case 'rect':
+      return <rect x={prim.x} y={prim.y} width={prim.w} height={prim.h} rx={prim.rx || undefined} {...common} />
+    case 'ellipse':
+      return <ellipse cx={prim.cx} cy={prim.cy} rx={prim.rx} ry={prim.ry} {...common} />
+    case 'polygon':
+      return <polygon points={prim.points.map(([px, py]) => `${px},${py}`).join(' ')} {...common} />
+    case 'path':
+      return <path d={prim.d} {...common} />
+    case 'none':
+      return <rect x={node.x} y={node.y} width={node.w} height={node.h} fill="transparent" stroke="none" />
+  }
 }
