@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, Search } from 'lucide-react'
+import { Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useDiagramStore } from '@/lib/store/useDiagramStore'
 import { generateId, Node, ShapeKind } from '@/lib/model/diagram'
@@ -136,18 +136,18 @@ export function ShapePalette({ collapsed = false }: { collapsed?: boolean }) {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#f3f6f7]">
-      <div className={`border-b border-[#d6dcde] p-3 max-lg:hidden ${collapsed ? 'hidden' : ''}`}>
-        <div className="flex h-10 items-center gap-2 rounded-2xl border border-[#d4d9dc] bg-white px-3 shadow-sm">
+    <div className="flex h-full min-h-0 flex-col bg-white">
+      <div className={`border-b border-[#e3ddd2] p-3 max-lg:hidden ${collapsed ? 'hidden' : ''}`}>
+        <div className="flex h-9 items-center gap-2 rounded-lg border border-[#e3ddd2] bg-[#f7f5f0] px-3">
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search shapes"
             aria-label="Search shapes"
             data-testid="palette-search"
-            className="h-full w-full bg-transparent text-[15px] text-[#333] outline-none placeholder:text-[#7a7a7a]"
+            className="h-full w-full bg-transparent text-[13px] text-[#333] outline-none placeholder:text-[#9a9388]"
           />
-          <Search className="h-5 w-5 shrink-0 text-[#4b4b4b]" />
+          <Search className="h-4 w-4 shrink-0 text-[#7a7a7a]" />
         </div>
       </div>
 
@@ -161,7 +161,7 @@ export function ShapePalette({ collapsed = false }: { collapsed?: boolean }) {
 
       <div className={`min-h-0 flex-1 overflow-y-auto px-4 py-3 max-lg:hidden ${collapsed ? 'hidden' : ''}`}>
         <section className="mb-5">
-          <PaletteSectionHeader title="General" open />
+          <PaletteSectionHeader title="General" />
           {visibleShapes.length === 0 ? (
             <p className="mt-3 text-[13px] text-[#8a8d8e]">No shapes match “{query}”.</p>
           ) : (
@@ -183,7 +183,7 @@ export function ShapePalette({ collapsed = false }: { collapsed?: boolean }) {
         </section>
 
         <section className="mb-5">
-          <PaletteSectionHeader title="Connectors" open />
+          <PaletteSectionHeader title="Connectors" />
           <div className="mt-3 grid grid-cols-5 gap-x-3 gap-y-4">
             {connectorShapes.map((shape) => (
               <button
@@ -207,11 +207,10 @@ export function ShapePalette({ collapsed = false }: { collapsed?: boolean }) {
   )
 }
 
-function PaletteSectionHeader({ title, open }: { title: string; open?: boolean }) {
+function PaletteSectionHeader({ title }: { title: string }) {
   return (
-    <div className="flex items-center gap-2 text-[17px] font-semibold text-[#3e4142]">
-      {open ? <ChevronDown className="h-4 w-4 fill-[#3e4142]" /> : <ChevronRight className="h-4 w-4 fill-[#3e4142]" />}
-      <span>{title}</span>
+    <div className="text-[11px] font-semibold uppercase tracking-wide text-[#8a8378]">
+      {title}
     </div>
   )
 }

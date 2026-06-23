@@ -61,6 +61,8 @@ export interface DiagramStore {
   redo: () => void
   selectNodes: (nodeIds: string[], addToSelection?: boolean) => void
   selectEdges: (edgeIds: string[], addToSelection?: boolean) => void
+  toggleNodeSelection: (nodeId: string) => void
+  toggleEdgeSelection: (edgeId: string) => void
   selectAll: () => void
   clearSelection: () => void
   deleteSelected: () => void
@@ -70,6 +72,11 @@ export interface DiagramStore {
   ungroupSelected: () => void
   bringToFront: () => void
   sendToBack: () => void
+  bringForward: () => void
+  sendBackward: () => void
+  alignSelected: (edge: 'left' | 'centerH' | 'right' | 'top' | 'middle' | 'bottom') => void
+  distributeSelected: (axis: 'h' | 'v') => void
+  rotateSelectedBy: (deg: number) => void
   copy: () => void
   paste: () => void
 
@@ -207,6 +214,24 @@ export const useDiagramStore = create<DiagramStore>((set, get) => ({
         : new Set(edgeIds),
       selectedNodeIds: addToSelection ? state.selectedNodeIds : new Set(),
     }))
+  },
+
+  toggleNodeSelection: (nodeId: string) => {
+    set((state) => {
+      const next = new Set(state.selectedNodeIds)
+      if (next.has(nodeId)) next.delete(nodeId)
+      else next.add(nodeId)
+      return { selectedNodeIds: next }
+    })
+  },
+
+  toggleEdgeSelection: (edgeId: string) => {
+    set((state) => {
+      const next = new Set(state.selectedEdgeIds)
+      if (next.has(edgeId)) next.delete(edgeId)
+      else next.add(edgeId)
+      return { selectedEdgeIds: next }
+    })
   },
 
   selectAll: () => {
@@ -427,6 +452,79 @@ export const useDiagramStore = create<DiagramStore>((set, get) => ({
       }
     })
     if (ops.length > 0) get().applyDiffWithHistory({ ops, summary: 'Send to back' })
+  },
+
+  bringForward: () => {
+    const state = get()
+    if (state.selectedNodeIds.size === 0) return
+    const ops: Diff['ops'] = state.diagram.nodes
+      .filter((n) => state.selectedNodeIds.has(n.id))
+      .map((n) => ({ type: 'updateNode', id: n.id, patch: { zIndex: (n.zIndex ?? 0) + 1 } }))
+    if (ops.length > 0) get().applyDiffWithHistory({ ops, summary: 'Bring forward' })
+  },
+
+  sendBackward: () => {
+    const state = get()
+    if (state.selectedNodeIds.size === 0) return
+    const ops: Diff['ops'] = state.diagram.nodes
+      .filter((n) => state.selectedNodeIds.has(n.id))
+      .map((n) => ({ type: 'updateNode', id: n.id, patch: { zIndex: (n.zIndex ?? 0) - 1 } }))
+    if (ops.length > 0) get().applyDiffWithHistory({ ops, summary: 'Send backward' })
+  },
+
+  alignSelected: (edge) => {
+    const state = get()
+    const nodes = state.diagram.nodes.filter((n) => state.selectedNodeIds.has(n.id))
+    if (nodes.length < 2) return
+    const minX = Math.min(...nodes.map((n) => n.x))
+    const maxX = Math.max(...nodes.map((n) => n.x + n.w))
+    const minY = Math.min(...nodes.map((n) => n.y))
+    const maxY = Math.max(...nodes.map((n) => n.y + n.h))
+    const cx = (minX + maxX) / 2
+    const cy = (minY + maxY) / 2
+
+    const ops: Diff['ops'] = nodes.map((n) => {
+      const patch: Partial<Node> = {}
+      switch (edge) {
+        case 'left': patch.x = minX; break
+        case 'right': patch.x = maxX - n.w; break
+        case 'centerH': patch.x = cx - n.w / 2; break
+        case 'top': patch.y = minY; break
+        case 'bottom': patch.y = maxY - n.h; break
+        case 'middle': patch.y = cy - n.h / 2; break
+      }
+      return { type: 'updateNode', id: n.id, patch }
+    })
+    get().applyDiffWithHistory({ ops, summary: `Align ${edge}` })
+  },
+
+  distributeSelected: (axis) => {
+    const state = get()
+    const nodes = state.diagram.nodes.filter((n) => state.selectedNodeIds.has(n.id))
+    if (nodes.length < 3) return
+    const horizontal = axis === 'h'
+    const sorted = [...nodes].sort((a, b) => (horizontal ? a.x - b.x : a.y - b.y))
+    const first = sorted[0]
+    const last = sorted[sorted.length - 1]
+    const start = horizontal ? first.x + first.w / 2 : first.y + first.h / 2
+    const end = horizontal ? last.x + last.w / 2 : last.y + last.h / 2
+    const step = (end - start) / (sorted.length - 1)
+
+    const ops: Diff['ops'] = sorted.map((n, i) => {
+      const center = start + step * i
+      const patch: Partial<Node> = horizontal ? { x: center - n.w / 2 } : { y: center - n.h / 2 }
+      return { type: 'updateNode', id: n.id, patch }
+    })
+    get().applyDiffWithHistory({ ops, summary: `Distribute ${horizontal ? 'horizontally' : 'vertically'}` })
+  },
+
+  rotateSelectedBy: (deg) => {
+    const state = get()
+    if (state.selectedNodeIds.size === 0) return
+    const ops: Diff['ops'] = state.diagram.nodes
+      .filter((n) => state.selectedNodeIds.has(n.id))
+      .map((n) => ({ type: 'updateNode', id: n.id, patch: { rotation: (((n.rotation ?? 0) + deg) % 360 + 360) % 360 } }))
+    if (ops.length > 0) get().applyDiffWithHistory({ ops, summary: 'Rotate' })
   },
 
   setDiagram: (diagram: Diagram) => {

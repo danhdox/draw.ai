@@ -9,6 +9,8 @@ export const StyleSchema = z.object({
   fontSize: z.number().optional(),
   fontFamily: z.string().optional(),
   fontWeight: z.string().optional(),
+  fontStyle: z.string().optional(),
+  fontColor: z.string().optional(),
   opacity: z.number().min(0).max(1).optional(),
 })
 

@@ -47,8 +47,8 @@ test.describe('draw.ai smoke', () => {
     await page.getByTestId('connector-tool').click()
     await expect(page.getByTestId('diagram-canvas')).toHaveAttribute('data-tool', 'connect')
 
-    await page.locator('[data-node-id]').nth(0).click({ position: { x: 20, y: 20 } })
-    await page.locator('[data-node-id]').nth(1).click({ position: { x: 20, y: 20 } })
+    await page.locator('[data-node-id]').nth(0).click()
+    await page.locator('[data-node-id]').nth(1).click()
 
     await expect(page.locator('[data-edge-id]')).toHaveCount(1)
   })
@@ -57,7 +57,7 @@ test.describe('draw.ai smoke', () => {
     await page.goto('/')
     await addShape(page, 'drawio-shape-rect')
 
-    await page.locator('[data-node-id]').first().click({ position: { x: 20, y: 20 } })
+    await page.locator('[data-node-id]').first().click()
     await page.keyboard.press('Delete')
     await expect(page.locator('[data-node-id]')).toHaveCount(0)
 

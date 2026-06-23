@@ -48,13 +48,12 @@ export async function nodeCenter(page: Page, index: number) {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
 }
 
-// The UI Tabs are plain <button>s (not ARIA role="tab"), so target by button name.
 export async function openInspectorTab(page: Page, name: 'Diagram' | 'Style') {
-  await page.getByRole('button', { name, exact: true }).first().click()
+  await page.getByRole('tab', { name, exact: true }).first().click()
 }
 
 export async function openAgentPanel(page: Page) {
-  await page.getByRole('button', { name: 'Agent', exact: true }).first().click()
+  await page.getByRole('tab', { name: 'Agent', exact: true }).first().click()
   await expect(page.getByTestId('agent-panel')).toBeVisible()
 }
 

@@ -60,7 +60,7 @@ test.describe('C. select & manipulate nodes', () => {
     await gotoEditor(page)
     await addNodeAt(page, 'rect', 520, 220)
     const node = page.locator('[data-node-id]').first()
-    await node.dblclick({ position: { x: 30, y: 20 } })
+    await node.dblclick()
     const input = page.locator('foreignObject input')
     await expect(input).toBeVisible()
     await input.fill('Hello')

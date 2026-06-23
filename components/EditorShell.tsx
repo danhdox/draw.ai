@@ -17,21 +17,26 @@ import {
   Layers3,
   MessageSquare,
   Redo2,
+  Maximize2,
   Save,
   Spline,
   Trash2,
   Undo2,
   Workflow,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Canvas } from '@/components/Canvas'
 import { ShapePalette } from '@/components/ShapePalette'
 import { InspectorTabs } from '@/components/InspectorTabs'
 import { Toaster } from '@/components/Toaster'
+import { ContextMenu } from '@/components/ContextMenu'
+import { useViewportStore } from '@/lib/store/useViewportStore'
 
 // The AI panel (AI SDK chat client) is the heaviest, least-used part of the
 // initial view — load it on demand to keep the first-load bundle small.
@@ -42,7 +47,7 @@ const AIPanel = dynamic(() => import('@/components/AIPanel').then((m) => m.AIPan
 import { useDiagramStore } from '@/lib/store/useDiagramStore'
 import { DiagramSchema } from '@/lib/model/diagram'
 import { downloadBlob } from '@/lib/export/download'
-import { downloadSVG } from '@/lib/export/svg'
+import { downloadSVG, diagramBounds } from '@/lib/export/svg'
 import { downloadPNG } from '@/lib/export/png'
 import { exportToMermaid } from '@/lib/export/mermaid'
 import { importFromMermaid } from '@/lib/import/mermaid'
@@ -77,6 +82,7 @@ export function EditorShell() {
     reset,
     applyDiffWithHistory,
   } = useDiagramStore()
+  const hasSelection = useDiagramStore((s) => s.selectedNodeIds.size + s.selectedEdgeIds.size > 0)
 
   const canUndo = historyIndex >= 0
   const canRedo = historyIndex < history.length - 1
@@ -411,6 +417,7 @@ export function EditorShell() {
       <FloatingToolbar
         canUndo={canUndo}
         canRedo={canRedo}
+        hasSelection={hasSelection}
         connectActive={tool === 'connect'}
         onUndo={undo}
         onRedo={redo}
@@ -422,6 +429,9 @@ export function EditorShell() {
         onBringToFront={bringToFront}
         onSendToBack={sendToBack}
       />
+
+      <ZoomControls bounds={diagramBounds(diagram)} />
+      <ContextMenu />
 
       <div className="hidden max-lg:block">
         <div data-testid="mobile-inspector" className="fixed bottom-3 left-3 right-3 max-h-[52vh] overflow-hidden rounded-xl border border-[#e3ddd2] bg-white shadow-xl">
@@ -474,7 +484,7 @@ function TopNav({
             <AppIcon />
             <span className="truncate text-[13px] font-semibold text-[#1d1a16]">Draw.ai</span>
           </Link>
-          <Button variant="outline" size="sm" className="h-8 gap-2 rounded-md bg-white text-[12px]" onClick={onNew}>
+          <Button variant="outline" size="sm" className="h-8 gap-2 rounded-md bg-white text-[12px]" onClick={onNew} title="New" aria-label="New diagram">
             <FileText className="h-3.5 w-3.5" />
             <span className="max-sm:hidden">New</span>
           </Button>
@@ -487,7 +497,7 @@ function TopNav({
               { label: 'Import Mermaid…', onSelect: onImportMermaid },
             ]}
           />
-          <Button variant="outline" size="sm" className="h-8 gap-2 rounded-md bg-white text-[12px]" onClick={onSave}>
+          <Button variant="outline" size="sm" className="h-8 gap-2 rounded-md bg-white text-[12px]" onClick={onSave} title="Save" aria-label="Save diagram">
             <Save className="h-3.5 w-3.5" />
             <span className="max-sm:hidden">Save</span>
           </Button>
@@ -530,25 +540,43 @@ function Menu({
   align?: 'left' | 'right'
 }) {
   const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  const [coords, setCoords] = useState<{ left?: number; right?: number; top: number }>({ top: 0 })
+  const btnRef = useRef<HTMLButtonElement>(null)
+
+  // Position the dropdown with `position: fixed` from the trigger rect, so no
+  // overflow ancestor can clip it or spawn a scrollbar.
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return
+    const r = btnRef.current.getBoundingClientRect()
+    setCoords(align === 'right' ? { right: window.innerWidth - r.right, top: r.bottom + 4 } : { left: r.left, top: r.bottom + 4 })
+  }, [open, align])
 
   useEffect(() => {
     if (!open) return
-    const onClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as globalThis.Node)) setOpen(false)
+    const onDown = (e: PointerEvent) => { if (!btnRef.current?.contains(e.target as globalThis.Node)) setOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    const onScroll = () => setOpen(false)
+    window.addEventListener('pointerdown', onDown)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('resize', onScroll)
+    return () => {
+      window.removeEventListener('pointerdown', onDown)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', onScroll)
     }
-    window.addEventListener('mousedown', onClick)
-    return () => window.removeEventListener('mousedown', onClick)
   }, [open])
 
   return (
-    <div className="relative" ref={ref}>
+    <>
       <Button
+        ref={btnRef}
         variant="outline"
         size="sm"
         className="h-8 gap-1.5 rounded-md bg-white text-[12px]"
         onClick={() => setOpen((o) => !o)}
         data-testid={testId}
+        title={label}
+        aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
       >
@@ -558,15 +586,17 @@ function Menu({
       </Button>
       {open && (
         <div
-          className={`absolute top-9 z-40 min-w-[180px] overflow-hidden rounded-lg border border-[#e3ddd2] bg-white py-1 shadow-xl ${align === 'right' ? 'right-0' : 'left-0'}`}
+          className="fixed z-50 min-w-[180px] overflow-hidden rounded-lg border border-[#e3ddd2] bg-white py-1 shadow-xl"
+          style={{ left: coords.left, right: coords.right, top: coords.top }}
           role="menu"
+          onPointerDown={(e) => e.stopPropagation()}
         >
           {items.map((item) => (
             <button
               key={item.label}
               type="button"
               role="menuitem"
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-[#2b2722] transition hover:bg-[#f4f2ee]"
+              className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-[12px] text-[#2b2722] transition hover:bg-[#f4f2ee]"
               onClick={() => {
                 setOpen(false)
                 item.onSelect()
@@ -578,6 +608,31 @@ function Menu({
           ))}
         </div>
       )}
+    </>
+  )
+}
+
+function ZoomControls({ bounds }: { bounds: { minX: number; minY: number; maxX: number; maxY: number } }) {
+  const zoomBy = useViewportStore((s) => s.zoomBy)
+  const reset = useViewportStore((s) => s.reset)
+  const fitTo = useViewportStore((s) => s.fitTo)
+  const percent = useViewportStore((s) => Math.round((1200 / s.viewBox.width) * 100))
+
+  return (
+    <div className="absolute bottom-5 right-[360px] z-30 flex items-center gap-0.5 rounded-xl border border-[#e5ded4] bg-white/90 px-1.5 py-1 shadow-lg shadow-black/5 backdrop-blur max-lg:bottom-[54vh] max-lg:right-2" data-testid="zoom-controls">
+      <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md" title="Zoom out" data-testid="zoom-out" onClick={() => zoomBy(1.2)}>
+        <ZoomOut className="h-4 w-4" />
+      </Button>
+      <button type="button" className="min-w-[44px] cursor-pointer rounded px-1 text-center text-[12px] tabular-nums text-[#3a352e] hover:bg-[#f4f2ee]" title="Reset zoom" data-testid="zoom-percent" onClick={() => reset()}>
+        {percent}%
+      </button>
+      <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md" title="Zoom in" data-testid="zoom-in" onClick={() => zoomBy(0.8)}>
+        <ZoomIn className="h-4 w-4" />
+      </Button>
+      <div className="mx-0.5 h-5 w-px bg-[#ebe5dc]" />
+      <Button variant="ghost" size="icon" className="h-7 w-7 rounded-md" title="Fit to content" data-testid="zoom-fit" onClick={() => fitTo(bounds)}>
+        <Maximize2 className="h-4 w-4" />
+      </Button>
     </div>
   )
 }
@@ -611,6 +666,7 @@ function AppIcon() {
 function FloatingToolbar({
   canUndo,
   canRedo,
+  hasSelection,
   connectActive,
   onUndo,
   onRedo,
@@ -624,6 +680,7 @@ function FloatingToolbar({
 }: {
   canUndo: boolean
   canRedo: boolean
+  hasSelection: boolean
   connectActive: boolean
   onUndo: () => void
   onRedo: () => void
@@ -676,6 +733,7 @@ function FloatingToolbar({
             data-testid="layers-button"
             aria-haspopup="menu"
             aria-expanded={layersOpen}
+            disabled={!hasSelection}
             onClick={() => setLayersOpen((o) => !o)}
           >
             <Layers3 className="h-4 w-4" />
@@ -705,13 +763,13 @@ function FloatingToolbar({
           <Grid3x3 className="h-4 w-4" />
         </Button>
         <ToolbarDivider />
-        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md" title="Copy (⌘C)" onClick={onCopy}>
+        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md" title="Copy (⌘C)" onClick={onCopy} disabled={!hasSelection}>
           <Copy className="h-4 w-4" />
         </Button>
         <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md" title="Paste (⌘V)" onClick={onPaste}>
           <ClipboardPaste className="h-4 w-4" />
         </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md" title="Delete (⌫)" onClick={onDelete}>
+        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md" title="Delete (⌫)" onClick={onDelete} disabled={!hasSelection}>
           <Trash2 className="h-4 w-4" />
         </Button>
       </div>

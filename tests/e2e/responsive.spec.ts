@@ -16,8 +16,8 @@ test.describe('K. responsive / mobile', () => {
       await page.locator('[data-node-id]').first().click()
       await expect(page.locator('[data-testid^="connect-handle-"]')).toHaveCount(1)
 
-      // Agent tab reachable in the bottom sheet (Tabs render plain buttons).
-      await page.getByRole('button', { name: 'Agent', exact: true }).first().click()
+      // Agent tab reachable in the bottom sheet.
+      await page.getByRole('tab', { name: 'Agent', exact: true }).first().click()
       await expect(page.getByTestId('agent-panel')).toBeVisible()
     })
   })

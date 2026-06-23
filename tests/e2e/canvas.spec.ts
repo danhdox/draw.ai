@@ -7,42 +7,46 @@ function parseViewBox(vb: string) {
 }
 
 test.describe('A. canvas navigation', () => {
-  test('dragging empty canvas pans the view', async ({ page }) => {
+  test('middle-drag pans the view', async ({ page }) => {
     await gotoEditor(page)
     const canvas = page.getByTestId('diagram-canvas')
     const before = parseViewBox((await canvas.getAttribute('viewBox'))!)
 
-    // Drag across empty canvas (clear of palette/inspector/toolbar).
-    await page.mouse.move(520, 200)
-    await page.mouse.down()
-    await page.mouse.move(720, 320, { steps: 8 })
-    await page.mouse.up()
+    await page.mouse.move(520, 220)
+    await page.mouse.down({ button: 'middle' })
+    await page.mouse.move(740, 360, { steps: 8 })
+    await page.mouse.up({ button: 'middle' })
 
     const after = parseViewBox((await canvas.getAttribute('viewBox'))!)
-    // Panning right/down moves the viewBox origin left/up.
     expect(after.x).toBeLessThan(before.x)
     expect(after.y).toBeLessThan(before.y)
   })
 
-  test('mouse wheel zooms the view', async ({ page }) => {
+  test('plain wheel pans, not zooms', async ({ page }) => {
     await gotoEditor(page)
     const canvas = page.getByTestId('diagram-canvas')
-    const width = async () => parseViewBox((await canvas.getAttribute('viewBox'))!).w
-    const before = await width()
-
+    const before = parseViewBox((await canvas.getAttribute('viewBox'))!)
     await page.mouse.move(520, 300)
-    await page.mouse.wheel(0, 200) // zoom out -> viewBox grows
-    await expect.poll(width).toBeGreaterThan(before)
-    const out = await width()
+    await page.mouse.wheel(0, 200)
+    await expect.poll(async () => parseViewBox((await canvas.getAttribute('viewBox'))!).y).toBeGreaterThan(before.y)
+    // width unchanged (no zoom)
+    expect(parseViewBox((await canvas.getAttribute('viewBox'))!).w).toBeCloseTo(before.w, 0)
+  })
 
-    await page.mouse.wheel(0, -400) // zoom in -> viewBox shrinks
-    await expect.poll(width).toBeLessThan(out)
+  test('zoom controls change the zoom level', async ({ page }) => {
+    await gotoEditor(page)
+    await expect(page.getByTestId('zoom-percent')).toHaveText('100%')
+    await page.getByTestId('zoom-in').click()
+    await expect(page.getByTestId('zoom-percent')).not.toHaveText('100%')
+    await page.getByTestId('zoom-percent').click() // reset
+    await expect(page.getByTestId('zoom-percent')).toHaveText('100%')
+    await page.getByTestId('zoom-out').click()
+    await expect(page.getByTestId('zoom-percent')).not.toHaveText('100%')
   })
 
   test('grid pattern scales with the configured grid size', async ({ page }) => {
     await gotoEditor(page)
     await addShape(page, 'rect')
-    // Default grid size is 20.
     await expect(page.locator('#grid')).toHaveAttribute('width', '20')
   })
 })

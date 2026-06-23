@@ -23,7 +23,8 @@ function common<T, V>(items: T[], get: (item: T) => V): V | undefined {
 }
 
 export function InspectorTabs() {
-  const { diagram, selectedNodeIds, selectedEdgeIds, applyDiffWithHistory, beginInteraction, updateLive, commitInteraction } = useDiagramStore()
+  const store = useDiagramStore()
+  const { diagram, selectedNodeIds, selectedEdgeIds, applyDiffWithHistory, beginInteraction, updateLive, commitInteraction } = store
 
   const selectedNodes = diagram.nodes.filter((n) => selectedNodeIds.has(n.id))
   const selectedEdges = diagram.edges.filter((e) => selectedEdgeIds.has(e.id))
@@ -74,10 +75,70 @@ export function InspectorTabs() {
   return (
     <div className="bg-white">
       <Tabs defaultValue="diagram" className="w-full">
-        <TabsList className="mx-4 mt-4 grid w-[calc(100%-2rem)] grid-cols-2 rounded-lg bg-[#f4f2ee]">
+        <TabsList className="mx-4 mt-4 grid w-[calc(100%-2rem)] grid-cols-3 rounded-lg bg-[#f4f2ee]">
           <TabsTrigger value="diagram" className="flex-1">Diagram</TabsTrigger>
           <TabsTrigger value="style" className="flex-1">Style</TabsTrigger>
+          <TabsTrigger value="arrange" className="flex-1">Arrange</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="arrange" className="m-0 p-4">
+          {selectedNodes.length === 0 && selectedEdges.length === 0 ? (
+            <p className="text-xs text-muted-foreground">Select objects to align, order, group, or rotate them.</p>
+          ) : (
+            <section className="space-y-4" data-testid="arrange-panel">
+              {selectedNodes.length >= 2 && (
+                <div>
+                  <Label>Align</Label>
+                  <div className="mt-1 grid grid-cols-6 gap-1">
+                    {([['left', 'L'], ['centerH', 'C'], ['right', 'R'], ['top', 'T'], ['middle', 'M'], ['bottom', 'B']] as const).map(([k, t]) => (
+                      <Button key={k} size="sm" variant="outline" className="h-8 px-0 text-[11px]" title={`Align ${k}`} onClick={() => store.alignSelected(k)}>{t}</Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {selectedNodes.length >= 3 && (
+                <div>
+                  <Label>Distribute</Label>
+                  <div className="mt-1 grid grid-cols-2 gap-1">
+                    <Button size="sm" variant="outline" className="h-8 text-[12px]" onClick={() => store.distributeSelected('h')}>Horizontal</Button>
+                    <Button size="sm" variant="outline" className="h-8 text-[12px]" onClick={() => store.distributeSelected('v')}>Vertical</Button>
+                  </div>
+                </div>
+              )}
+              <div>
+                <Label>Order</Label>
+                <div className="mt-1 grid grid-cols-2 gap-1">
+                  <Button size="sm" variant="outline" className="h-8 text-[12px]" onClick={store.bringToFront}>To front</Button>
+                  <Button size="sm" variant="outline" className="h-8 text-[12px]" onClick={store.sendToBack}>To back</Button>
+                  <Button size="sm" variant="outline" className="h-8 text-[12px]" onClick={store.bringForward}>Forward</Button>
+                  <Button size="sm" variant="outline" className="h-8 text-[12px]" onClick={store.sendBackward}>Backward</Button>
+                </div>
+              </div>
+              {selectedNodes.length >= 1 && (
+                <>
+                  <div>
+                    <Label>Group</Label>
+                    <div className="mt-1 grid grid-cols-2 gap-1">
+                      <Button size="sm" variant="outline" className="h-8 text-[12px]" disabled={selectedNodes.length < 2} onClick={store.groupSelected}>Group</Button>
+                      <Button size="sm" variant="outline" className="h-8 text-[12px]" onClick={store.ungroupSelected}>Ungroup</Button>
+                    </div>
+                  </div>
+                  <div>
+                    <Label>Rotate</Label>
+                    <div className="mt-1 flex items-center gap-2">
+                      <Button size="sm" variant="outline" className="h-8 flex-1 text-[12px]" onClick={() => store.rotateSelectedBy(-90)}>−90°</Button>
+                      <Button size="sm" variant="outline" className="h-8 flex-1 text-[12px]" onClick={() => store.rotateSelectedBy(90)}>+90°</Button>
+                      <Input type="number" className="h-8 w-20" aria-label="Angle"
+                        value={common(selectedNodes, (n) => Math.round(n.rotation ?? 0)) ?? ''}
+                        placeholder={common(selectedNodes, (n) => Math.round(n.rotation ?? 0)) === undefined ? 'Mixed' : ''}
+                        onChange={(e) => { const v = parseFloat(e.target.value); if (!Number.isNaN(v)) updateNodeFields({ rotation: ((v % 360) + 360) % 360 }, 'Set angle') }} />
+                    </div>
+                  </div>
+                </>
+              )}
+            </section>
+          )}
+        </TabsContent>
 
         <TabsContent value="diagram" className="m-0 p-4">
           <section className="space-y-4">

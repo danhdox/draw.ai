@@ -1,7 +1,7 @@
 import { Diagram } from '@/lib/model/diagram'
 import { downloadBlob } from '@/lib/export/download'
 import { nodePrimitive, primitiveToSvg } from '@/lib/render/shapes'
-import { edgeAnchors, edgePath, edgeMidpoint, nodeBox } from '@/lib/render/edges'
+import { routeEdgePoints, pointsToPath, polylineMidpoint, nodeBox } from '@/lib/render/edges'
 
 // Escape text for safe inclusion in SVG/XML. Without this, labels containing
 // `<`, `>`, `&`, or quotes would produce invalid markup.
@@ -80,11 +80,13 @@ export function exportSVG(diagram: Diagram): string {
 
     const from = nodeBox(fromNode)
     const to = nodeBox(toNode)
-    const anchors = edgeAnchors(
+    const offsetEdge = { ...edge, points: (edge.points ?? []).map((p) => ({ x: p.x + offsetX, y: p.y + offsetY })) }
+    const pts = routeEdgePoints(
       { ...from, x: from.x + offsetX, y: from.y + offsetY },
-      { ...to, x: to.x + offsetX, y: to.y + offsetY }
+      { ...to, x: to.x + offsetX, y: to.y + offsetY },
+      offsetEdge
     )
-    const d = edgePath(anchors, edge.routing)
+    const d = pointsToPath(pts, edge.routing)
 
     const stroke = edge.style?.stroke || '#000'
     const strokeWidth = edge.style?.strokeWidth || 2
@@ -95,7 +97,7 @@ export function exportSVG(diagram: Diagram): string {
     svg += `  <path d="${d}" stroke="${stroke}" stroke-width="${strokeWidth}" fill="none"${dash}${markerStart}${markerEnd}/>\n`
 
     if (edge.label) {
-      const mid = edgeMidpoint(anchors)
+      const mid = polylineMidpoint(pts)
       svg += `  <text x="${mid.x}" y="${mid.y - 4}" text-anchor="middle" fill="${stroke}" font-size="12">${escapeXml(edge.label)}</text>\n`
     }
   })
