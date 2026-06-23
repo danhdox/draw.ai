@@ -14,32 +14,44 @@
   - Drag nodes to reposition
   - Resize nodes with corner handles
   - Edit text by double-clicking nodes
-  - Four node types: Rectangle, Ellipse, Diamond, Text
-- ✅ **Edge Operations**:
-  - Connect nodes with directed edges
-  - Select edges
-  - Automatic arrow markers
+  - Honest shape library: rectangle, rounded, ellipse, square/circle, diamond,
+    parallelogram, hexagon, triangle, trapezoid, chevron, cylinder, cloud,
+    document, note, and text. Each palette item renders the same shape on the
+    canvas and in exports (driven by `shapeKind`, with the legacy `type` kept
+    for backward compatibility).
+- ✅ **Edge / Connector Operations**:
+  - Manual connectors: pick the connector tool (toolbar or palette) and click a
+    source then a target node, or drag from a node's green connection handle
+  - Border-clipped routing (straight / orthogonal / curved) with start/end
+    arrowheads and dashed styling
+  - Select, style, label, copy, delete, and undo/redo edges
+  - Self-connections are rejected; endpoints are validated
 - ✅ **Edit Operations**:
-  - Delete selected items
-  - Copy/Paste nodes and edges
+  - Delete / Backspace removes the selection
+  - Copy/Paste, Duplicate (⌘D), Select all (⌘A)
   - Undo/Redo with full history stack
-  - Z-order management (basic)
-- ✅ **Styling**:
-  - Customize fill color, stroke color, stroke width
-  - Font size control
-  - Per-node style configuration
+  - Z-order: Bring to front / Send to back
+- ✅ **Styling (Inspector)**:
+  - Nodes: text, x/y, width/height, fill, stroke, stroke width, font size,
+    font family, opacity — with multi-select mixed values and batch edits
+  - Edges: stroke, width, label, arrowheads, route type, dashed
 
-#### AI Agent
-- ✅ **Generate Diagrams**: Describe a diagram in natural language and the AI creates it
-- ✅ **Clean Up Layout**: Automatically organize nodes using hierarchical layout
-- ✅ **Explain Diagrams**: Get an AI-generated explanation of what your diagram represents
+#### AI Agent (`/api/chat`)
+- ✅ **Generate Diagrams**: Describe a diagram in natural language (works offline
+  with a local fallback when no `OPENAI_API_KEY` is set)
+- ✅ **Clean Up Layout**: Organizes nodes with the local ELK layout — no API key required
+- ✅ **Explain Diagrams**: Get an explanation of what your diagram represents
 - ✅ **Diff-based Changes**: All AI modifications use a validated diff system
-- ✅ **Preview & Accept/Reject**: Review AI changes before applying them
+- ✅ **Preview & Accept/Reject**: Review AI changes before applying them, with
+  loading / error / applied / rejected states
 - ✅ **Undo AI Changes**: AI operations are fully integrated with undo/redo
 
 #### File Operations
 - ✅ **Save/Load JSON**: Export and import diagrams as JSON
-- ✅ **Export SVG**: Generate SVG files for use in other applications
+- ✅ **Export SVG**: Vector export with XML-escaped labels
+- ✅ **Export PNG**: Rendered bitmap sized to the diagram bounds
+- ✅ **Mermaid Import/Export**: Flowchart nodes, shapes, edges, and labels
+  (`flowchart TD/LR`); imports run layout automatically
 
 #### Architecture
 - ✅ **Canonical Data Model**: Clean separation between data and UI
@@ -51,34 +63,28 @@
 ### 📋 TODO Features (Future Enhancements)
 
 #### Advanced Editor Features
-- [ ] Grouping nodes (basic implementation exists, needs UI)
+- [ ] Group/ungroup UI affordances (store actions + ⌘G/⇧⌘G shortcuts exist)
 - [ ] Bezier curve edges with custom control points
 - [ ] Alignment guides and distribution tools
 - [ ] Multiple canvas pages/tabs
-- [ ] Layers panel
+- [ ] Full layers panel (z-order Bring-to-front / Send-to-back exists)
 - [ ] Node templates/library
-- [ ] Custom node shapes
 
 #### Enhanced AI Capabilities
 - [ ] Iterative refinement ("make it bigger", "add more nodes")
 - [ ] Style transfer ("make it look like a UML diagram")
 - [ ] Auto-complete as you draw
 - [ ] Diagram templates from descriptions
-- [ ] Export to Mermaid syntax
-- [ ] Import from Mermaid syntax
 
 #### Export & Integration
-- [ ] Export PNG (via canvas rendering)
 - [ ] Export PDF
-- [ ] Mermaid import/export
 - [ ] Integration with Excalidraw format
 - [ ] Embed mode for use in other apps
 
 #### Layout Improvements
-- [ ] ELKJS integration for sophisticated auto-layout
+- [x] ELKJS integration for hierarchical auto-layout
 - [ ] Force-directed layout
-- [ ] Circular layout
-- [ ] Tree layout with customization
+- [ ] Circular / tree layout customization
 
 #### Collaboration
 - [ ] Real-time collaboration (multiplayer)
@@ -89,8 +95,8 @@
 ## Getting Started
 
 ### Prerequisites
-- Node.js 18+ 
-- pnpm (or npm/yarn)
+- Node.js 18+
+- pnpm 9.15.9 (pinned via `packageManager`; run through `corepack pnpm@9.15.9` for reproducible installs)
 
 ### Installation
 
@@ -102,14 +108,16 @@ cd draw.ai
 
 2. Install dependencies:
 ```bash
-pnpm install
+corepack pnpm@9.15.9 install --frozen-lockfile
 ```
 
-3. Set up environment variables:
-Create a `.env.local` file in the root directory:
+3. (Optional) Set up environment variables for live AI generation/explanation.
+The AI panel works offline with a local fallback; an OpenAI key only enriches
+Generate/Explain. Cleanup Layout never needs a key. Create `.env.local`:
 ```env
-# Required for AI features
 OPENAI_API_KEY=your_openai_api_key_here
+# Optional: override the model (default gpt-4o-mini)
+OPENAI_MODEL=gpt-4o-mini
 ```
 
 4. Run the development server:
@@ -118,6 +126,15 @@ pnpm dev
 ```
 
 5. Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+### Tests
+
+```bash
+pnpm test -- --run   # unit/integration (Vitest)
+pnpm build           # production build + type check
+pnpm lint            # ESLint (flat config)
+pnpm test:e2e        # Playwright smoke suite (run pnpm build first)
+```
 
 ### Building for Production
 
@@ -133,9 +150,11 @@ pnpm start
 2. **Move Nodes**: Click and drag nodes
 3. **Resize**: Select a node and drag corner handles
 4. **Edit Text**: Double-click a node
-5. **Connect Nodes**: Use the arrow tool to draw edges between nodes
-6. **Delete**: Select items and press Delete or use the toolbar button
-7. **Undo/Redo**: Use Ctrl+Z / Ctrl+Shift+Z or toolbar buttons
+5. **Connect Nodes**: Click the connector tool in the bottom toolbar (or the
+   Connector palette item), then click a source node and a target node. You can
+   also drag from a selected node's green handle. Press Esc to exit connect mode.
+6. **Delete**: Select items and press Delete/Backspace or use the toolbar button
+7. **Undo/Redo**: Use ⌘/Ctrl+Z / ⇧⌘/Ctrl+Shift+Z or toolbar buttons
 
 ### AI Features
 1. **Generate Diagram**:
@@ -155,10 +174,10 @@ pnpm start
    - Read the AI-generated explanation
 
 ### File Operations
-- **New**: File → New (clears the canvas)
-- **Save**: File → Save (downloads JSON file)
-- **Open**: File → Open (load JSON file)
-- **Export SVG**: File → Export SVG
+- **New**: clears the canvas
+- **Save**: downloads a JSON file
+- **Open ▾**: Open JSON, or Import Mermaid
+- **Export ▾**: Export SVG, PNG, or Mermaid
 
 ## Architecture
 
@@ -202,18 +221,20 @@ Zustand store manages:
 
 All mutations go through `applyDiffWithHistory()` to ensure undo/redo works.
 
-#### 4. AI Agent (`app/api/agent/route.ts`)
-Server route that:
-1. Receives action (generate/cleanup/explain) + context
-2. Calls OpenAI with structured prompts
-3. Validates returned diff against schema
-4. Returns diff or explanation to client
+#### 4. AI Agent (`app/api/chat/route.ts`)
+A single streaming route (`/api/chat`) that:
+1. Receives action (generate/cleanup/explain) + diagram context
+2. `cleanup` runs the local ELK layout (no OpenAI); `generate`/`explain` call
+   OpenAI when a key is present and otherwise use a local fallback
+3. Validates returned diffs against the schema and streams a diff preview
 
 Client (`components/AIPanel.tsx`):
-1. Sends request to `/api/agent`
-2. Shows preview of diff
-3. User accepts → apply to store
-4. User rejects → discard
+1. Sends a request to `/api/chat` with the chosen action
+2. Shows a diff preview with loading / error / applied / rejected states
+3. User accepts → apply to store; rejects → discard
+
+> The earlier `app/api/agent/route.ts` (non-streaming) has been removed; the
+> streaming `/api/chat` route is the single AI path.
 
 ### Tech Stack
 
@@ -223,44 +244,38 @@ Client (`components/AIPanel.tsx`):
 - **Components**: shadcn/ui + lucide-react
 - **State**: Zustand
 - **Validation**: Zod
-- **AI**: Vercel AI SDK + OpenAI
-- **Layout**: Custom hierarchical layout (ELKJS integration pending)
-- **Testing**: Vitest
+- **AI**: Vercel AI SDK + OpenAI (with offline fallback)
+- **Layout**: ELK (`elkjs`) hierarchical layout, with a deterministic grid fallback
+- **Testing**: Vitest (unit/integration) + Playwright (e2e smoke)
 
 ### Project Structure
 
 ```
 draw.ai/
 ├── app/
-│   ├── api/agent/route.ts      # AI agent endpoint
+│   ├── api/chat/route.ts       # Streaming AI endpoint (generate/cleanup/explain)
 │   ├── layout.tsx              # Root layout with theme provider
 │   ├── page.tsx                # Main editor page
 │   └── globals.css             # Global styles + Tailwind
 ├── components/
 │   ├── ui/                     # shadcn/ui components
 │   ├── AIPanel.tsx             # AI interaction panel
-│   ├── Canvas.tsx              # SVG canvas with editing
-│   ├── EditorShell.tsx         # Main layout container
-│   ├── InspectorTabs.tsx       # Right sidebar tabs
+│   ├── Canvas.tsx              # SVG canvas with editing + connectors
+│   ├── EditorShell.tsx         # Main layout, toolbar, menus, shortcuts
+│   ├── InspectorTabs.tsx       # Node + edge inspector
 │   ├── ShapePalette.tsx        # Left shape picker
-│   └── theme-provider.tsx      # Theme context
+│   └── Toaster.tsx             # Toast notifications
 ├── lib/
-│   ├── model/
-│   │   ├── diagram.ts          # Data model + schemas
-│   │   └── diff.ts             # Diff operations
-│   ├── store/
-│   │   └── useDiagramStore.ts  # Zustand store
-│   ├── layout/
-│   │   └── layout.ts           # Layout algorithms
-│   ├── export/
-│   │   └── svg.ts              # SVG export
-│   └── utils.ts                # Utility functions
-├── tests/
-│   ├── diff.test.ts            # Diff operation tests
-│   └── schema.test.ts          # Schema validation tests
-├── package.json
-├── tsconfig.json
-├── tailwind.config.ts
+│   ├── model/                  # diagram.ts (schemas), diff.ts (operations)
+│   ├── store/                  # useDiagramStore, useAgentStore, useToastStore
+│   ├── render/                 # shapes.ts, edges.ts (shared canvas/export geometry)
+│   ├── layout/                 # layout.ts (grid/hierarchical), elk.ts (ELK)
+│   ├── export/                 # svg.ts, png.ts, mermaid.ts, download.ts
+│   ├── import/                 # mermaid.ts
+│   └── agent/                  # diagramAgent.ts, types.ts
+├── tests/                      # Vitest unit/integration + tests/e2e (Playwright)
+├── playwright.config.ts
+├── eslint.config.mjs
 └── next.config.js
 ```
 
@@ -269,13 +284,18 @@ draw.ai/
 ### Running Tests
 
 ```bash
-pnpm test
+pnpm test -- --run
 ```
 
 Tests cover:
-- Diff operations (apply, invert, validate)
+- Diff operations (apply, invert, validate) and undo/redo
 - Schema validation
-- Undo/redo correctness
+- Store actions: connectors, self-connect guard, duplicate, group, z-order, nudge
+- Export: SVG escaping/bounds, PNG happy path + failure
+- Mermaid export, import, round-trip, and invalid-input errors
+- Layout: grid/hierarchical and ELK (empty, disconnected, cycle, selected subset)
+- AI route (`/api/chat`): cleanup, generate fallback, explain — all without an OpenAI key
+- E2E smoke (`pnpm test:e2e`): add shape, connect nodes, delete+undo, mobile
 
 ### Linting
 
@@ -312,4 +332,6 @@ MIT License - see LICENSE file for details
 
 ---
 
-**Note**: This is an MVP. Some features are marked as TODO and will be implemented in future versions. The AI agent requires an OpenAI API key to function.
+**Note**: Local-first, no database. The AI panel works without an OpenAI key
+(local fallback for Generate, real ELK layout for Cleanup); a key only enables
+live LLM Generate/Explain. Remaining TODO items are listed above.

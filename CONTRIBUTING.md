@@ -85,7 +85,7 @@ All state modifications should go through the diff system:
 
 ### Improving AI Capabilities
 
-The AI agent is in `app/api/agent/route.ts`. When improving:
+The AI agent is in `app/api/chat/route.ts`. When improving:
 - Keep prompts clear and specific
 - Always validate returned data with Zod
 - Test with various inputs

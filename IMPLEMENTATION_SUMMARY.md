@@ -92,8 +92,8 @@ A fully functional diagram editor built with Next.js, TypeScript, and AI capabil
 - **Clipboard** for copy/paste
 - All mutations through `applyDiffWithHistory()`
 
-#### AI Integration (`app/api/agent/route.ts`)
-- **Vercel AI SDK** with OpenAI
+#### AI Integration (`app/api/chat/route.ts`)
+- **Vercel AI SDK** with OpenAI (streaming `/api/chat`; offline fallback + local ELK cleanup)
 - **Structured prompts** for consistent output
 - **Server-side validation** before returning to client
 - **Error handling** with meaningful messages

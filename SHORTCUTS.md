@@ -1,40 +1,41 @@
 # Keyboard Shortcuts
 
+Shortcuts are disabled while typing in text fields (inputs, textareas, selects).
+
 ## Navigation
-- **Mouse drag** - Pan the canvas
+- **Mouse drag** (empty canvas) - Pan the canvas
 - **Mouse wheel** - Zoom in/out
 - **Shift + Click** - Add to selection
 
 ## Editing
 - **Double-click node** - Edit text
 - **Enter** (while editing) - Finish editing text
-- **Escape** - Clear selection / Cancel operation
+- **Escape** - Clear selection / exit connect mode / cancel
 - **Delete** / **Backspace** - Delete selected items
+- **Arrow keys** - Nudge selected nodes by 1px
+- **Shift + Arrow keys** - Nudge selected nodes by the grid size
 
 ## Commands
-- **Ctrl/Cmd + Z** - Undo
-- **Ctrl/Cmd + Shift + Z** - Redo
-- **Ctrl/Cmd + C** - Copy
-- **Ctrl/Cmd + V** - Paste
-- **Ctrl/Cmd + A** - Select all (TODO)
-- **Ctrl/Cmd + S** - Save (TODO)
+- **⌘/Ctrl + Z** - Undo
+- **⌘/Ctrl + Shift + Z** (or **Ctrl + Y**) - Redo
+- **⌘/Ctrl + C** - Copy
+- **⌘/Ctrl + V** - Paste
+- **⌘/Ctrl + D** - Duplicate selection
+- **⌘/Ctrl + A** - Select all
+- **⌘/Ctrl + S** - Save (downloads JSON)
+- **⌘/Ctrl + G** - Group selection
+- **⌘/Ctrl + Shift + G** - Ungroup selection
 
-## Node Operations
+## Node / Edge Operations
 - **Click + Drag** - Move selected nodes
 - **Corner handles** - Resize node
+- **Green handle (drag)** - Draw a connector to another node
+- **Connector tool** - Click a source node, then a target node, to connect them
 - **Click edge** - Select edge
 
 ## Canvas
-- **Grid visible** - Toggle in right panel
-- **Snap to grid** - Toggle in right panel
+- **Grid size / Snap** - Configurable in the Design inspector
 
 ## Future Shortcuts (TODO)
-- **Ctrl/Cmd + D** - Duplicate
-- **Ctrl/Cmd + G** - Group selected
-- **Ctrl/Cmd + Shift + G** - Ungroup
-- **Arrow keys** - Move selected nodes
-- **Shift + Arrow keys** - Move by larger increment
-- **Ctrl/Cmd + 0** - Reset zoom
-- **Ctrl/Cmd + +** - Zoom in
-- **Ctrl/Cmd + -** - Zoom out
 - **Space + Drag** - Pan (alternative)
+- **⌘/Ctrl + 0 / + / -** - Reset / zoom in / zoom out
