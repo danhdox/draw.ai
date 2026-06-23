@@ -1,10 +1,31 @@
 import { create } from 'zustand'
 import { Diagram, Node, Edge, createEmptyDiagram, generateId } from '@/lib/model/diagram'
-import { Diff, applyDiff, invertDiff } from '@/lib/model/diff'
+import { Diff, applyDiff, invertDiff, diffDiagrams } from '@/lib/model/diff'
+import { toast } from '@/lib/store/useToastStore'
+
+export type EditorTool = 'select' | 'connect'
+
+// Bound the undo stack so long sessions don't grow memory without limit.
+const MAX_HISTORY = 100
 
 export interface HistoryEntry {
   diagram: Diagram
+  // Forward diff (for redo) and its inverse (for undo).
+  diff: Diff
   inverseDiff: Diff
+}
+
+// Append an entry, dropping the oldest if we exceed the cap. Returns the new
+// history array and the index of the latest entry.
+function pushHistory(
+  history: HistoryEntry[],
+  index: number,
+  entry: HistoryEntry
+): { history: HistoryEntry[]; historyIndex: number } {
+  const next = history.slice(0, index + 1)
+  next.push(entry)
+  if (next.length > MAX_HISTORY) next.splice(0, next.length - MAX_HISTORY)
+  return { history: next, historyIndex: next.length - 1 }
 }
 
 export interface DiagramStore {
@@ -21,26 +42,43 @@ export interface DiagramStore {
   clipboard: { nodes: Node[]; edges: Edge[] } | null
   
   // UI state
+  tool: EditorTool
   isPanning: boolean
   isConnecting: boolean
   connectingFrom: { nodeId: string; portId?: string } | null
-  
+
+  // Transient interaction snapshot (drag/resize/slider) for history coalescing
+  interactionSnapshot: Diagram | null
+
   // Actions
   applyDiffWithHistory: (diff: Diff) => void
+  // Interaction coalescing: begin → updateLive (no history) → commit (one entry).
+  beginInteraction: () => void
+  updateLive: (diff: Diff) => void
+  commitInteraction: (summary?: string) => void
+  cancelInteraction: () => void
   undo: () => void
   redo: () => void
   selectNodes: (nodeIds: string[], addToSelection?: boolean) => void
   selectEdges: (edgeIds: string[], addToSelection?: boolean) => void
+  selectAll: () => void
   clearSelection: () => void
   deleteSelected: () => void
+  duplicateSelected: () => void
+  nudgeSelected: (dx: number, dy: number) => void
+  groupSelected: () => void
+  ungroupSelected: () => void
+  bringToFront: () => void
+  sendToBack: () => void
   copy: () => void
   paste: () => void
-  
+
   // Direct mutations (use sparingly, prefer diffs)
   setDiagram: (diagram: Diagram) => void
   reset: () => void
-  
-  // Connection mode
+
+  // Tool / connection mode
+  setTool: (tool: EditorTool) => void
   startConnecting: (nodeId: string, portId?: string) => void
   finishConnecting: (nodeId: string, portId?: string) => void
   cancelConnecting: () => void
@@ -54,34 +92,74 @@ export const useDiagramStore = create<DiagramStore>((set, get) => ({
   history: [],
   historyIndex: -1,
   clipboard: null,
+  tool: 'select',
   isPanning: false,
   isConnecting: false,
   connectingFrom: null,
+  interactionSnapshot: null,
 
   // Apply a diff and record it in history
   applyDiffWithHistory: (diff: Diff) => {
     const state = get()
     const result = applyDiff(state.diagram, diff)
-    
+
     if (result.errors && result.errors.length > 0) {
       console.error('Errors applying diff:', result.errors)
+      toast.error(`Could not apply change: ${result.errors[0]}`)
       return
     }
 
     const inverseDiff = invertDiff(state.diagram, diff)
-    
-    // Truncate history if we're not at the end
-    const newHistory = state.history.slice(0, state.historyIndex + 1)
-    newHistory.push({
+    const { history, historyIndex } = pushHistory(state.history, state.historyIndex, {
       diagram: state.diagram,
+      diff,
       inverseDiff,
     })
 
-    set({
-      diagram: result.diagram,
-      history: newHistory,
-      historyIndex: newHistory.length - 1,
+    set({ diagram: result.diagram, history, historyIndex })
+  },
+
+  // Snapshot the current diagram at the start of a drag/resize/slider sweep.
+  // Idempotent: nested begins keep the original snapshot.
+  beginInteraction: () => {
+    if (get().interactionSnapshot) return
+    set({ interactionSnapshot: JSON.parse(JSON.stringify(get().diagram)) as Diagram })
+  },
+
+  // Apply a diff to the live diagram WITHOUT touching history (drag preview).
+  updateLive: (diff: Diff) => {
+    const result = applyDiff(get().diagram, diff)
+    if (result.errors && result.errors.length > 0) return
+    set({ diagram: result.diagram })
+  },
+
+  // Commit the whole interaction as a single history entry.
+  commitInteraction: (summary?: string) => {
+    const state = get()
+    const before = state.interactionSnapshot
+    if (!before) return
+
+    const forward = diffDiagrams(before, state.diagram)
+    if (forward.ops.length === 0) {
+      set({ interactionSnapshot: null })
+      return
+    }
+
+    const diff: Diff = { ...forward, summary }
+    const inverseDiff = invertDiff(before, diff)
+    const { history, historyIndex } = pushHistory(state.history, state.historyIndex, {
+      diagram: before,
+      diff,
+      inverseDiff,
     })
+
+    set({ interactionSnapshot: null, history, historyIndex })
+  },
+
+  cancelInteraction: () => {
+    const before = get().interactionSnapshot
+    if (!before) return
+    set({ diagram: before, interactionSnapshot: null })
   },
 
   undo: () => {
@@ -101,9 +179,10 @@ export const useDiagramStore = create<DiagramStore>((set, get) => ({
     const state = get()
     if (state.historyIndex >= state.history.length - 1) return
 
+    // Re-apply the stored forward diff. (Reconstructing it by inverting the
+    // inverse against the before-snapshot loses added nodes/edges.)
     const entry = state.history[state.historyIndex + 1]
-    const inverseDiff = invertDiff(entry.diagram, entry.inverseDiff)
-    const result = applyDiff(state.diagram, inverseDiff)
+    const result = applyDiff(state.diagram, entry.diff)
 
     set({
       diagram: result.diagram,
@@ -112,20 +191,29 @@ export const useDiagramStore = create<DiagramStore>((set, get) => ({
   },
 
   selectNodes: (nodeIds: string[], addToSelection = false) => {
-    set((state) => {
-      const newSelection = addToSelection
+    set((state) => ({
+      selectedNodeIds: addToSelection
         ? new Set([...state.selectedNodeIds, ...nodeIds])
-        : new Set(nodeIds)
-      return { selectedNodeIds: newSelection }
-    })
+        : new Set(nodeIds),
+      // A plain (non-additive) node selection clears any edge selection.
+      selectedEdgeIds: addToSelection ? state.selectedEdgeIds : new Set(),
+    }))
   },
 
   selectEdges: (edgeIds: string[], addToSelection = false) => {
-    set((state) => {
-      const newSelection = addToSelection
+    set((state) => ({
+      selectedEdgeIds: addToSelection
         ? new Set([...state.selectedEdgeIds, ...edgeIds])
-        : new Set(edgeIds)
-      return { selectedEdgeIds: newSelection }
+        : new Set(edgeIds),
+      selectedNodeIds: addToSelection ? state.selectedNodeIds : new Set(),
+    }))
+  },
+
+  selectAll: () => {
+    const state = get()
+    set({
+      selectedNodeIds: new Set(state.diagram.nodes.map((n) => n.id)),
+      selectedEdgeIds: new Set(state.diagram.edges.map((e) => e.id)),
     })
   },
 
@@ -142,8 +230,15 @@ export const useDiagramStore = create<DiagramStore>((set, get) => ({
       ops.push({ type: 'removeNode', id })
     })
 
-    // Delete selected edges
+    // Delete selected edges, skipping any that a removed node will already
+    // cascade-delete (otherwise applyDiff reports a "not found" error and the
+    // whole diff is rejected).
     state.selectedEdgeIds.forEach((id) => {
+      const edge = state.diagram.edges.find((e) => e.id === id)
+      if (!edge) return
+      if (state.selectedNodeIds.has(edge.from.nodeId) || state.selectedNodeIds.has(edge.to.nodeId)) {
+        return
+      }
       ops.push({ type: 'removeEdge', id })
     })
 
@@ -218,6 +313,122 @@ export const useDiagramStore = create<DiagramStore>((set, get) => ({
     }
   },
 
+  duplicateSelected: () => {
+    const state = get()
+    const nodes = state.diagram.nodes.filter((n) => state.selectedNodeIds.has(n.id))
+    if (nodes.length === 0) return
+
+    const edges = state.diagram.edges.filter(
+      (e) =>
+        state.selectedNodeIds.has(e.from.nodeId) && state.selectedNodeIds.has(e.to.nodeId)
+    )
+
+    const idMap = new Map<string, string>()
+    const ops: Diff['ops'] = []
+
+    nodes.forEach((node) => {
+      const newId = generateId('node')
+      idMap.set(node.id, newId)
+      ops.push({
+        type: 'addNode',
+        node: { ...node, id: newId, x: node.x + 30, y: node.y + 30 },
+      })
+    })
+
+    edges.forEach((edge) => {
+      const newFromId = idMap.get(edge.from.nodeId)
+      const newToId = idMap.get(edge.to.nodeId)
+      if (newFromId && newToId) {
+        ops.push({
+          type: 'addEdge',
+          edge: {
+            ...edge,
+            id: generateId('edge'),
+            from: { ...edge.from, nodeId: newFromId },
+            to: { ...edge.to, nodeId: newToId },
+          },
+        })
+      }
+    })
+
+    get().applyDiffWithHistory({ ops, summary: 'Duplicate selection' })
+    get().selectNodes(Array.from(idMap.values()))
+  },
+
+  nudgeSelected: (dx: number, dy: number) => {
+    const state = get()
+    if (state.selectedNodeIds.size === 0) return
+
+    const ops: Diff['ops'] = []
+    state.diagram.nodes.forEach((node) => {
+      if (state.selectedNodeIds.has(node.id)) {
+        ops.push({
+          type: 'updateNode',
+          id: node.id,
+          patch: { x: node.x + dx, y: node.y + dy },
+        })
+      }
+    })
+
+    if (ops.length > 0) {
+      get().applyDiffWithHistory({ ops, summary: 'Move selection' })
+    }
+  },
+
+  groupSelected: () => {
+    const state = get()
+    const nodeIds = Array.from(state.selectedNodeIds)
+    if (nodeIds.length < 2) return
+
+    get().applyDiffWithHistory({
+      ops: [{ type: 'group', groupId: generateId('group'), nodeIds }],
+      summary: 'Group selection',
+    })
+  },
+
+  ungroupSelected: () => {
+    const state = get()
+    const affected = state.diagram.groups.filter((g) =>
+      g.nodeIds.some((id) => state.selectedNodeIds.has(id))
+    )
+    if (affected.length === 0) return
+
+    get().applyDiffWithHistory({
+      ops: affected.map((g) => ({ type: 'ungroup', groupId: g.id })),
+      summary: 'Ungroup selection',
+    })
+  },
+
+  bringToFront: () => {
+    const state = get()
+    if (state.selectedNodeIds.size === 0) return
+    const maxZ = state.diagram.nodes.reduce((max, n) => Math.max(max, n.zIndex ?? 0), 0)
+
+    const ops: Diff['ops'] = []
+    let next = maxZ + 1
+    state.diagram.nodes.forEach((node) => {
+      if (state.selectedNodeIds.has(node.id)) {
+        ops.push({ type: 'updateNode', id: node.id, patch: { zIndex: next++ } })
+      }
+    })
+    if (ops.length > 0) get().applyDiffWithHistory({ ops, summary: 'Bring to front' })
+  },
+
+  sendToBack: () => {
+    const state = get()
+    if (state.selectedNodeIds.size === 0) return
+    const minZ = state.diagram.nodes.reduce((min, n) => Math.min(min, n.zIndex ?? 0), 0)
+
+    const ops: Diff['ops'] = []
+    let next = minZ - 1
+    state.diagram.nodes.forEach((node) => {
+      if (state.selectedNodeIds.has(node.id)) {
+        ops.push({ type: 'updateNode', id: node.id, patch: { zIndex: next-- } })
+      }
+    })
+    if (ops.length > 0) get().applyDiffWithHistory({ ops, summary: 'Send to back' })
+  },
+
   setDiagram: (diagram: Diagram) => {
     set({
       diagram,
@@ -236,10 +447,16 @@ export const useDiagramStore = create<DiagramStore>((set, get) => ({
       history: [],
       historyIndex: -1,
       clipboard: null,
+      tool: 'select',
       isPanning: false,
       isConnecting: false,
       connectingFrom: null,
+      interactionSnapshot: null,
     })
+  },
+
+  setTool: (tool: EditorTool) => {
+    set({ tool, isConnecting: false, connectingFrom: null })
   },
 
   startConnecting: (nodeId: string, portId?: string) => {
@@ -253,6 +470,17 @@ export const useDiagramStore = create<DiagramStore>((set, get) => ({
     const state = get()
     if (!state.connectingFrom) return
 
+    // Validate endpoints: both nodes must exist and self-connections are
+    // skipped (a single click on the source should not create a loop).
+    const fromId = state.connectingFrom.nodeId
+    const sourceExists = state.diagram.nodes.some((n) => n.id === fromId)
+    const targetExists = state.diagram.nodes.some((n) => n.id === nodeId)
+
+    if (!sourceExists || !targetExists || fromId === nodeId) {
+      set({ isConnecting: false, connectingFrom: null })
+      return
+    }
+
     const edgeId = generateId('edge')
     get().applyDiffWithHistory({
       ops: [
@@ -262,16 +490,16 @@ export const useDiagramStore = create<DiagramStore>((set, get) => ({
             id: edgeId,
             from: state.connectingFrom,
             to: { nodeId, portId },
+            arrowEnd: true,
           },
         },
       ],
       summary: 'Add edge',
     })
 
-    set({
-      isConnecting: false,
-      connectingFrom: null,
-    })
+    // Stay in connect mode so multiple edges can be chained; clear the source.
+    set({ isConnecting: false, connectingFrom: null })
+    get().selectEdges([edgeId])
   },
 
   cancelConnecting: () => {
