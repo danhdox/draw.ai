@@ -36,6 +36,7 @@ import { ShapePalette } from '@/components/ShapePalette'
 import { InspectorTabs } from '@/components/InspectorTabs'
 import { Toaster } from '@/components/Toaster'
 import { ContextMenu } from '@/components/ContextMenu'
+import { Minimap } from '@/components/Minimap'
 import { useViewportStore } from '@/lib/store/useViewportStore'
 
 // The AI panel (AI SDK chat client) is the heaviest, least-used part of the
@@ -78,6 +79,10 @@ export function EditorShell() {
     selectAll,
     copy,
     paste,
+    pasteText,
+    toggleLockSelected,
+    bringForward,
+    sendBackward,
     setDiagram,
     reset,
     applyDiffWithHistory,
@@ -251,7 +256,24 @@ export function EditorShell() {
       }
       if (mod && e.key.toLowerCase() === 'v') {
         e.preventDefault()
-        paste()
+        if (typeof navigator !== 'undefined' && navigator.clipboard?.readText) {
+          navigator.clipboard.readText().then((t) => pasteText(t)).catch(() => paste())
+        } else paste()
+        return
+      }
+      if (mod && e.key.toLowerCase() === 'l') {
+        e.preventDefault()
+        toggleLockSelected()
+        return
+      }
+      if (mod && e.key === ']') {
+        e.preventDefault()
+        bringForward()
+        return
+      }
+      if (mod && e.key === '[') {
+        e.preventDefault()
+        sendBackward()
         return
       }
       if (mod && e.key.toLowerCase() === 'a') {
@@ -431,6 +453,7 @@ export function EditorShell() {
       />
 
       <ZoomControls bounds={diagramBounds(diagram)} />
+      <Minimap />
       <ContextMenu />
 
       <div className="hidden max-lg:block">

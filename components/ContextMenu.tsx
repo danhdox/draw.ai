@@ -45,6 +45,7 @@ export function ContextMenu() {
   const nodeExtra: Item[] = [
     { label: 'Group', shortcut: '⌘G', onClick: store.groupSelected },
     { label: 'Ungroup', shortcut: '⇧⌘G', onClick: store.ungroupSelected },
+    { label: 'Lock / Unlock', shortcut: '⌘L', onClick: store.toggleLockSelected },
   ]
   const canvasItems: Item[] = [
     { label: 'Paste', shortcut: '⌘V', onClick: store.paste, disabled: !hasClipboard },

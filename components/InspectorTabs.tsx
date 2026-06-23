@@ -242,6 +242,33 @@ export function InspectorTabs() {
                 value={common(selectedNodes, (n) => n.style?.opacity ?? 1) ?? 1}
                 onChange={(v) => updateNodeStyle({ opacity: v }, 'Change opacity')}
               />
+
+              <div className="grid grid-cols-2 gap-3">
+                <ColorField label="Font Color" value={common(selectedNodes, (n) => n.style?.fontColor ?? '#26221d') ?? '#26221d'} onChange={(v) => updateNodeStyle({ fontColor: v }, 'Font color')} />
+                <div>
+                  <Label>Line Style</Label>
+                  <Select value={common(selectedNodes, (n) => n.style?.strokeDasharray ?? '') ?? ''} onChange={(v) => updateNodeStyle({ strokeDasharray: v || undefined }, 'Line style')}
+                    options={[{ value: '', label: 'Solid' }, { value: '6 4', label: 'Dashed' }, { value: '2 4', label: 'Dotted' }]} />
+                </div>
+              </div>
+
+              <div>
+                <Label>Text</Label>
+                <div className="mt-1 flex flex-wrap gap-1" data-testid="node-text-style">
+                  <ToggleBtn active={common(selectedNodes, (n) => n.style?.fontWeight === 'bold') ?? false} title="Bold" onClick={() => updateNodeStyle({ fontWeight: selectedNodes[0]?.style?.fontWeight === 'bold' ? undefined : 'bold' }, 'Bold')}><span className="font-bold">B</span></ToggleBtn>
+                  <ToggleBtn active={common(selectedNodes, (n) => n.style?.fontStyle === 'italic') ?? false} title="Italic" onClick={() => updateNodeStyle({ fontStyle: selectedNodes[0]?.style?.fontStyle === 'italic' ? undefined : 'italic' }, 'Italic')}><span className="italic">I</span></ToggleBtn>
+                  <span className="mx-1 w-px self-stretch bg-[#ece6dc]" />
+                  {(['left', 'center', 'right'] as const).map((a) => (
+                    <ToggleBtn key={a} active={(common(selectedNodes, (n) => n.style?.textAlign ?? 'center') ?? 'center') === a} title={`Align ${a}`} onClick={() => updateNodeStyle({ textAlign: a }, 'Align text')}>{a[0].toUpperCase()}</ToggleBtn>
+                  ))}
+                </div>
+              </div>
+
+              <Toggle label="No fill (transparent)" checked={(common(selectedNodes, (n) => n.style?.fill ?? '#ffffff') ?? '') === 'transparent'} onChange={(c) => updateNodeStyle({ fill: c ? 'transparent' : '#ffffff' }, 'Fill')} />
+
+              <Button size="sm" variant="outline" className="w-full text-[12px]" data-testid="lock-toggle" onClick={store.toggleLockSelected}>
+                {selectedNodes.every((n) => n.locked) ? 'Unlock' : 'Lock'}
+              </Button>
             </section>
           ) : selectedEdges.length > 0 ? (
             <section className="space-y-4" data-testid="edge-inspector">
@@ -295,6 +322,19 @@ export function InspectorTabs() {
                   onChange={(checked) => updateEdgeStyle({ strokeDasharray: checked ? '6 4' : undefined }, 'Toggle dashed')}
                 />
               </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Start arrow</Label>
+                  <Select value={common(selectedEdges, (e) => e.arrowStartType ?? 'arrow') ?? 'arrow'} onChange={(v) => updateEdgeFields({ arrowStartType: v as Edge['arrowStartType'] }, 'Start arrow type')}
+                    options={[{ value: 'arrow', label: 'Arrow' }, { value: 'open', label: 'Open' }, { value: 'diamond', label: 'Diamond' }, { value: 'circle', label: 'Circle' }]} />
+                </div>
+                <div>
+                  <Label>End arrow</Label>
+                  <Select value={common(selectedEdges, (e) => e.arrowEndType ?? 'arrow') ?? 'arrow'} onChange={(v) => updateEdgeFields({ arrowEndType: v as Edge['arrowEndType'] }, 'End arrow type')}
+                    options={[{ value: 'arrow', label: 'Arrow' }, { value: 'open', label: 'Open' }, { value: 'diamond', label: 'Diamond' }, { value: 'circle', label: 'Circle' }]} />
+                </div>
+              </div>
             </section>
           ) : (
             <p className="text-xs text-muted-foreground">Select a node or edge to edit its style.</p>
@@ -307,6 +347,15 @@ export function InspectorTabs() {
 
 function Label({ children }: { children: React.ReactNode }) {
   return <label className="text-xs text-muted-foreground">{children}</label>
+}
+
+function ToggleBtn({ active, title, onClick, children }: { active: boolean; title: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button type="button" title={title} aria-pressed={active} onClick={onClick}
+      className={`flex h-8 w-8 cursor-pointer items-center justify-center rounded-md border text-[13px] transition ${active ? 'border-[#3b82f6] bg-[#eef4ff] text-[#1d4ed8]' : 'border-input bg-background text-[#45484a] hover:bg-[#f4f2ee]'}`}>
+      {children}
+    </button>
+  )
 }
 
 function Stat({ label, value }: { label: string; value: number }) {
