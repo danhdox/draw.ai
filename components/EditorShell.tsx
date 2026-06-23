@@ -1,35 +1,54 @@
 'use client'
 
 import {
+  ArrowDownToLine,
+  ArrowUpToLine,
+  ChevronDown,
   Copy,
   ChevronsLeft,
   ChevronsRight,
+  ClipboardPaste,
   Download,
   FileText,
   FolderOpen,
   Grid3x3,
   History,
+  Image as ImageIcon,
   Layers3,
   MessageSquare,
   Redo2,
   Save,
+  Spline,
   Trash2,
   Undo2,
   Workflow,
 } from 'lucide-react'
 import Link from 'next/link'
-import { useState } from 'react'
+import dynamic from 'next/dynamic'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Canvas } from '@/components/Canvas'
 import { ShapePalette } from '@/components/ShapePalette'
 import { InspectorTabs } from '@/components/InspectorTabs'
-import { AIPanel } from '@/components/AIPanel'
+import { Toaster } from '@/components/Toaster'
+
+// The AI panel (AI SDK chat client) is the heaviest, least-used part of the
+// initial view — load it on demand to keep the first-load bundle small.
+const AIPanel = dynamic(() => import('@/components/AIPanel').then((m) => m.AIPanel), {
+  ssr: false,
+  loading: () => <div className="p-4 text-[12px] text-[#746f66]">Loading agent…</div>,
+})
 import { useDiagramStore } from '@/lib/store/useDiagramStore'
 import { DiagramSchema } from '@/lib/model/diagram'
 import { downloadBlob } from '@/lib/export/download'
 import { downloadSVG } from '@/lib/export/svg'
-import { runLayout } from '@/lib/layout/layout'
+import { downloadPNG } from '@/lib/export/png'
+import { exportToMermaid } from '@/lib/export/mermaid'
+import { importFromMermaid } from '@/lib/import/mermaid'
+import { runElkLayout } from '@/lib/layout/elk'
+import { toast } from '@/lib/store/useToastStore'
+import { loadDiagram, saveDiagram } from '@/lib/persistence'
 
 export function EditorShell() {
   const [paletteCollapsed, setPaletteCollapsed] = useState(false)
@@ -42,7 +61,16 @@ export function EditorShell() {
     redo,
     history,
     historyIndex,
+    tool,
+    setTool,
     deleteSelected,
+    duplicateSelected,
+    nudgeSelected,
+    groupSelected,
+    ungroupSelected,
+    bringToFront,
+    sendToBack,
+    selectAll,
     copy,
     paste,
     setDiagram,
@@ -56,19 +84,25 @@ export function EditorShell() {
   const handleNew = () => {
     if (confirm('Create a new diagram? Unsaved changes will be lost.')) {
       reset()
+      toast.info('Started a new diagram')
     }
   }
 
   const handleSave = () => {
-    const json = JSON.stringify(diagram, null, 2)
-    const blob = new Blob([json], { type: 'application/json' })
-    downloadBlob(blob, 'diagram.json')
+    try {
+      const json = JSON.stringify(diagram, null, 2)
+      const blob = new Blob([json], { type: 'application/json' })
+      downloadBlob(blob, 'diagram.json')
+      toast.success('Saved diagram.json')
+    } catch {
+      toast.error('Could not save the diagram')
+    }
   }
 
   const handleLoad = () => {
     const input = document.createElement('input')
     input.type = 'file'
-    input.accept = 'application/json'
+    input.accept = 'application/json,.json'
     input.onchange = (event) => {
       const file = (event.target as HTMLInputElement).files?.[0]
       if (!file) return
@@ -79,19 +113,187 @@ export function EditorShell() {
           const json = JSON.parse(readerEvent.target?.result as string)
           const validated = DiagramSchema.parse(json)
           setDiagram(validated)
+          toast.success('Diagram loaded')
         } catch {
-          alert('Invalid diagram file')
+          toast.error('Invalid diagram file — could not parse JSON')
         }
       }
+      reader.onerror = () => toast.error('Could not read the selected file')
       reader.readAsText(file)
     }
     input.click()
   }
 
-  const handleAutoLayout = () => {
-    const diff = runLayout(diagram, 'hierarchical')
-    applyDiffWithHistory(diff)
+  const handleImportMermaid = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.mmd,.mermaid,.txt,.md,text/plain'
+    input.onchange = (event) => {
+      const file = (event.target as HTMLInputElement).files?.[0]
+      if (!file) return
+
+      const reader = new FileReader()
+      reader.onload = (readerEvent) => {
+        try {
+          const imported = importFromMermaid(readerEvent.target?.result as string)
+          setDiagram(imported)
+          toast.success(`Imported ${imported.nodes.length} nodes from Mermaid`)
+        } catch (error) {
+          toast.error(error instanceof Error ? `Mermaid import failed: ${error.message}` : 'Mermaid import failed')
+        }
+      }
+      reader.onerror = () => toast.error('Could not read the selected file')
+      reader.readAsText(file)
+    }
+    input.click()
   }
+
+  const handleExportSVG = () => {
+    try {
+      downloadSVG(diagram)
+      toast.success('Exported diagram.svg')
+    } catch {
+      toast.error('SVG export failed')
+    }
+  }
+
+  const handleExportPNG = async () => {
+    try {
+      await downloadPNG(diagram)
+      toast.success('Exported diagram.png')
+    } catch (error) {
+      toast.error(error instanceof Error ? `PNG export failed: ${error.message}` : 'PNG export failed')
+    }
+  }
+
+  const handleExportMermaid = () => {
+    try {
+      const mermaid = exportToMermaid(diagram)
+      const blob = new Blob([mermaid], { type: 'text/plain' })
+      downloadBlob(blob, 'diagram.mmd')
+      toast.success('Exported diagram.mmd')
+    } catch {
+      toast.error('Mermaid export failed')
+    }
+  }
+
+  const handleAutoLayout = async () => {
+    try {
+      const diff = await runElkLayout(diagram)
+      if (diff.ops.length === 0) {
+        toast.info('Nothing to lay out')
+        return
+      }
+      applyDiffWithHistory(diff)
+      toast.success(diff.summary || 'Layout applied')
+    } catch {
+      toast.error('Layout failed')
+    }
+  }
+
+  // Restore the autosaved diagram on first load.
+  useEffect(() => {
+    const restored = loadDiagram()
+    if (restored && (restored.nodes.length > 0 || restored.edges.length > 0)) {
+      setDiagram(restored)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Autosave to localStorage (debounced) whenever the diagram changes.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const unsubscribe = useDiagramStore.subscribe((state, prev) => {
+      if (state.diagram === prev.diagram) return
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => saveDiagram(useDiagramStore.getState().diagram), 500)
+    })
+    return () => {
+      if (timer) clearTimeout(timer)
+      unsubscribe()
+    }
+  }, [])
+
+  // Global keyboard shortcuts (disabled while typing in fields).
+  useEffect(() => {
+    const isTypingTarget = (el: EventTarget | null): boolean => {
+      const node = el as HTMLElement | null
+      if (!node) return false
+      const tag = node.tagName
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || node.isContentEditable
+    }
+
+    const handler = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return
+      const mod = e.metaKey || e.ctrlKey
+
+      if (mod && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) redo()
+        else undo()
+        return
+      }
+      if (mod && e.key.toLowerCase() === 'y') {
+        e.preventDefault()
+        redo()
+        return
+      }
+      if (mod && e.key.toLowerCase() === 'c') {
+        e.preventDefault()
+        copy()
+        return
+      }
+      if (mod && e.key.toLowerCase() === 'v') {
+        e.preventDefault()
+        paste()
+        return
+      }
+      if (mod && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        selectAll()
+        return
+      }
+      if (mod && e.key.toLowerCase() === 'd') {
+        e.preventDefault()
+        duplicateSelected()
+        return
+      }
+      if (mod && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        handleSave()
+        return
+      }
+      if (mod && e.key.toLowerCase() === 'g') {
+        e.preventDefault()
+        if (e.shiftKey) ungroupSelected()
+        else groupSelected()
+        return
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault()
+        deleteSelected()
+        return
+      }
+      if (e.key.startsWith('Arrow')) {
+        const step = e.shiftKey ? diagram.meta.gridSize : 1
+        const delta: Record<string, [number, number]> = {
+          ArrowUp: [0, -step],
+          ArrowDown: [0, step],
+          ArrowLeft: [-step, 0],
+          ArrowRight: [step, 0],
+        }
+        const move = delta[e.key]
+        if (move) {
+          e.preventDefault()
+          nudgeSelected(move[0], move[1])
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diagram])
 
   return (
     <div className="relative h-screen overflow-hidden bg-[#fbfaf7] text-[#1d1a16]">
@@ -100,10 +302,13 @@ export function EditorShell() {
       </div>
 
       <TopNav
-        onExport={() => downloadSVG(diagram)}
-        onSave={handleSave}
-        onOpen={handleLoad}
         onNew={handleNew}
+        onOpen={handleLoad}
+        onSave={handleSave}
+        onExportSVG={handleExportSVG}
+        onExportPNG={handleExportPNG}
+        onExportMermaid={handleExportMermaid}
+        onImportMermaid={handleImportMermaid}
       />
 
       <aside
@@ -151,10 +356,10 @@ export function EditorShell() {
                 </Button>
               </div>
               <div className="flex flex-col items-center gap-2 p-2" data-testid="inspector-compact-rail">
-                <Button variant="outline" size="icon" className="h-9 w-9 rounded-md" title="Design inspector">
+                <Button variant="outline" size="icon" className="h-9 w-9 rounded-md" title="Design inspector" onClick={() => setInspectorCollapsed(false)}>
                   <Grid3x3 className="h-4 w-4" />
                 </Button>
-                <Button variant="outline" size="icon" className="h-9 w-9 rounded-md" title="Agent panel">
+                <Button variant="outline" size="icon" className="h-9 w-9 rounded-md" title="Agent panel" onClick={() => { setInspectorCollapsed(false); setInspectorTab('copilot') }}>
                   <Workflow className="h-4 w-4" />
                 </Button>
               </div>
@@ -206,12 +411,16 @@ export function EditorShell() {
       <FloatingToolbar
         canUndo={canUndo}
         canRedo={canRedo}
+        connectActive={tool === 'connect'}
         onUndo={undo}
         onRedo={redo}
+        onToggleConnect={() => setTool(tool === 'connect' ? 'select' : 'connect')}
         onDelete={deleteSelected}
         onCopy={copy}
         onPaste={paste}
         onLayout={handleAutoLayout}
+        onBringToFront={bringToFront}
+        onSendToBack={sendToBack}
       />
 
       <div className="hidden max-lg:block">
@@ -230,20 +439,28 @@ export function EditorShell() {
           </Tabs>
         </div>
       </div>
+
+      <Toaster />
     </div>
   )
 }
 
 function TopNav({
-  onExport,
-  onSave,
-  onOpen,
   onNew,
+  onOpen,
+  onSave,
+  onExportSVG,
+  onExportPNG,
+  onExportMermaid,
+  onImportMermaid,
 }: {
-  onExport: () => void
-  onSave: () => void
-  onOpen: () => void
   onNew: () => void
+  onOpen: () => void
+  onSave: () => void
+  onExportSVG: () => void
+  onExportPNG: () => void
+  onExportMermaid: () => void
+  onImportMermaid: () => void
 }) {
   return (
     <header className="absolute left-0 right-0 top-0 z-30 border-b border-[#e3ddd2] bg-white/92 px-5 py-2 shadow-sm backdrop-blur max-lg:px-3">
@@ -261,23 +478,107 @@ function TopNav({
             <FileText className="h-3.5 w-3.5" />
             <span className="max-sm:hidden">New</span>
           </Button>
-          <Button variant="outline" size="sm" className="h-8 gap-2 rounded-md bg-white text-[12px]" onClick={onOpen}>
-            <FolderOpen className="h-3.5 w-3.5" />
-            <span className="max-sm:hidden">Open</span>
-          </Button>
+          <Menu
+            label="Open"
+            icon={<FolderOpen className="h-3.5 w-3.5" />}
+            testId="open-menu"
+            items={[
+              { label: 'Open JSON…', onSelect: onOpen },
+              { label: 'Import Mermaid…', onSelect: onImportMermaid },
+            ]}
+          />
           <Button variant="outline" size="sm" className="h-8 gap-2 rounded-md bg-white text-[12px]" onClick={onSave}>
             <Save className="h-3.5 w-3.5" />
             <span className="max-sm:hidden">Save</span>
           </Button>
         </div>
         <div className="flex shrink-0 items-center" data-testid="top-nav-right-actions">
-          <Button variant="outline" size="sm" className="h-8 gap-2 rounded-md bg-white text-[12px]" onClick={onExport}>
-            <Download className="h-3.5 w-3.5" />
-            <span className="max-sm:hidden">Export</span>
-          </Button>
+          <Menu
+            label="Export"
+            icon={<Download className="h-3.5 w-3.5" />}
+            testId="export-menu"
+            align="right"
+            items={[
+              { label: 'Export SVG', icon: <Download className="h-3.5 w-3.5" />, onSelect: onExportSVG },
+              { label: 'Export PNG', icon: <ImageIcon className="h-3.5 w-3.5" />, onSelect: onExportPNG },
+              { label: 'Export Mermaid', icon: <Spline className="h-3.5 w-3.5" />, onSelect: onExportMermaid },
+            ]}
+          />
         </div>
       </div>
     </header>
+  )
+}
+
+interface MenuItem {
+  label: string
+  onSelect: () => void
+  icon?: React.ReactNode
+}
+
+function Menu({
+  label,
+  icon,
+  items,
+  testId,
+  align = 'left',
+}: {
+  label: string
+  icon?: React.ReactNode
+  items: MenuItem[]
+  testId?: string
+  align?: 'left' | 'right'
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as globalThis.Node)) setOpen(false)
+    }
+    window.addEventListener('mousedown', onClick)
+    return () => window.removeEventListener('mousedown', onClick)
+  }, [open])
+
+  return (
+    <div className="relative" ref={ref}>
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-8 gap-1.5 rounded-md bg-white text-[12px]"
+        onClick={() => setOpen((o) => !o)}
+        data-testid={testId}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        {icon}
+        <span className="max-sm:hidden">{label}</span>
+        <ChevronDown className="h-3 w-3 opacity-60" />
+      </Button>
+      {open && (
+        <div
+          className={`absolute top-9 z-40 min-w-[180px] overflow-hidden rounded-lg border border-[#e3ddd2] bg-white py-1 shadow-xl ${align === 'right' ? 'right-0' : 'left-0'}`}
+          role="menu"
+        >
+          {items.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-[#2b2722] transition hover:bg-[#f4f2ee]"
+              onClick={() => {
+                setOpen(false)
+                item.onSelect()
+              }}
+            >
+              {item.icon}
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -310,45 +611,107 @@ function AppIcon() {
 function FloatingToolbar({
   canUndo,
   canRedo,
+  connectActive,
   onUndo,
   onRedo,
+  onToggleConnect,
   onDelete,
   onCopy,
   onPaste,
   onLayout,
+  onBringToFront,
+  onSendToBack,
 }: {
   canUndo: boolean
   canRedo: boolean
+  connectActive: boolean
   onUndo: () => void
   onRedo: () => void
+  onToggleConnect: () => void
   onDelete: () => void
   onCopy: () => void
   onPaste: () => void
   onLayout: () => void
+  onBringToFront: () => void
+  onSendToBack: () => void
 }) {
+  const [layersOpen, setLayersOpen] = useState(false)
+  const layersRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!layersOpen) return
+    const onClick = (e: MouseEvent) => {
+      if (layersRef.current && !layersRef.current.contains(e.target as globalThis.Node)) setLayersOpen(false)
+    }
+    window.addEventListener('mousedown', onClick)
+    return () => window.removeEventListener('mousedown', onClick)
+  }, [layersOpen])
+
   return (
     <div className="absolute bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1 rounded-xl border border-[#e5ded4] bg-white/90 px-2 py-1.5 shadow-lg shadow-black/5 backdrop-blur max-lg:bottom-[54vh] max-lg:left-2 max-lg:right-2 max-lg:translate-x-0 max-lg:overflow-x-auto max-lg:[&>button]:shrink-0">
-        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md" title="Undo" onClick={onUndo} disabled={!canUndo}>
+        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md" title="Undo (⌘Z)" onClick={onUndo} disabled={!canUndo}>
           <Undo2 className="h-4 w-4" />
         </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md" title="Redo" onClick={onRedo} disabled={!canRedo}>
+        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md" title="Redo (⇧⌘Z)" onClick={onRedo} disabled={!canRedo}>
           <Redo2 className="h-4 w-4" />
         </Button>
         <ToolbarDivider />
-        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md" title="Layers">
-          <Layers3 className="h-4 w-4" />
+        <Button
+          variant={connectActive ? 'default' : 'ghost'}
+          size="icon"
+          className="h-8 w-8 rounded-md"
+          title={connectActive ? 'Connector tool (active) — click two nodes' : 'Connector tool — click two nodes to link'}
+          aria-pressed={connectActive}
+          data-testid="connector-tool"
+          onClick={onToggleConnect}
+        >
+          <Spline className="h-4 w-4" />
         </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md" title="Auto layout" onClick={onLayout}>
+        <div className="relative" ref={layersRef}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 rounded-md"
+            title="Z-order"
+            data-testid="layers-button"
+            aria-haspopup="menu"
+            aria-expanded={layersOpen}
+            onClick={() => setLayersOpen((o) => !o)}
+          >
+            <Layers3 className="h-4 w-4" />
+          </Button>
+          {layersOpen && (
+            <div className="absolute bottom-10 left-1/2 z-40 min-w-[170px] -translate-x-1/2 overflow-hidden rounded-lg border border-[#e3ddd2] bg-white py-1 shadow-xl" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-[#2b2722] transition hover:bg-[#f4f2ee]"
+                onClick={() => { setLayersOpen(false); onBringToFront() }}
+              >
+                <ArrowUpToLine className="h-3.5 w-3.5" /> Bring to front
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-[#2b2722] transition hover:bg-[#f4f2ee]"
+                onClick={() => { setLayersOpen(false); onSendToBack() }}
+              >
+                <ArrowDownToLine className="h-3.5 w-3.5" /> Send to back
+              </button>
+            </div>
+          )}
+        </div>
+        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md" title="Auto layout" onClick={onLayout} data-testid="auto-layout">
           <Grid3x3 className="h-4 w-4" />
         </Button>
         <ToolbarDivider />
-        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md" title="Copy" onClick={onCopy}>
+        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md" title="Copy (⌘C)" onClick={onCopy}>
           <Copy className="h-4 w-4" />
         </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md" title="Paste" onClick={onPaste}>
-          <Workflow className="h-4 w-4" />
+        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md" title="Paste (⌘V)" onClick={onPaste}>
+          <ClipboardPaste className="h-4 w-4" />
         </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md" title="Delete" onClick={onDelete}>
+        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-md" title="Delete (⌫)" onClick={onDelete}>
           <Trash2 className="h-4 w-4" />
         </Button>
       </div>
