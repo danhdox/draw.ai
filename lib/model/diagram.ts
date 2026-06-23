@@ -11,6 +11,7 @@ export const StyleSchema = z.object({
   fontWeight: z.string().optional(),
   fontStyle: z.string().optional(),
   fontColor: z.string().optional(),
+  textAlign: z.enum(['left', 'center', 'right']).optional(),
   opacity: z.number().min(0).max(1).optional(),
 })
 
@@ -34,6 +35,15 @@ export const ShapeKindSchema = z.enum([
   'chevron',
   'note',
   'text',
+  // Flowchart extras
+  'stadium',
+  'card',
+  'step',
+  'callout',
+  'manualInput',
+  'display',
+  'predefinedProcess',
+  'internalStorage',
 ])
 
 export type ShapeKind = z.infer<typeof ShapeKindSchema>
@@ -51,6 +61,7 @@ export const NodeSchema = z.object({
   text: z.string().optional(),
   style: StyleSchema.optional(),
   zIndex: z.number().optional(),
+  locked: z.boolean().optional(),
 })
 
 export type Node = z.infer<typeof NodeSchema>
@@ -76,6 +87,9 @@ export const EdgeSchema = z.object({
   // Arrowheads. Default behaviour is an end arrow only.
   arrowStart: z.boolean().optional(),
   arrowEnd: z.boolean().optional(),
+  // Arrowhead glyph styles.
+  arrowStartType: z.enum(['arrow', 'open', 'diamond', 'circle']).optional(),
+  arrowEndType: z.enum(['arrow', 'open', 'diamond', 'circle']).optional(),
 })
 
 export type Edge = z.infer<typeof EdgeSchema>

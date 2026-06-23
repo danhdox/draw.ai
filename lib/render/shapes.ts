@@ -184,6 +184,95 @@ export function shapeGeometry(
       return { kind: 'path', d }
     }
 
+    case 'stadium':
+      return { kind: 'rect', x, y, w, h, rx: h / 2 }
+
+    case 'card': {
+      const cut = Math.min(w, h) * 0.22
+      return {
+        kind: 'polygon',
+        points: [
+          [x + cut, y],
+          [x + w, y],
+          [x + w, y + h],
+          [x, y + h],
+          [x, y + cut],
+        ],
+      }
+    }
+
+    case 'step': {
+      const tip = Math.min(w * 0.25, 30)
+      return {
+        kind: 'polygon',
+        points: [
+          [x, y],
+          [x + w - tip, y],
+          [x + w, cy],
+          [x + w - tip, y + h],
+          [x, y + h],
+        ],
+      }
+    }
+
+    case 'callout': {
+      const by = y + h * 0.72
+      const d = [
+        `M ${round(x)} ${round(y)}`,
+        `L ${round(x + w)} ${round(y)}`,
+        `L ${round(x + w)} ${round(by)}`,
+        `L ${round(x + w * 0.34)} ${round(by)}`,
+        `L ${round(x + w * 0.2)} ${round(y + h)}`,
+        `L ${round(x + w * 0.26)} ${round(by)}`,
+        `L ${round(x)} ${round(by)}`,
+        'Z',
+      ].join(' ')
+      return { kind: 'path', d }
+    }
+
+    case 'manualInput':
+      return {
+        kind: 'polygon',
+        points: [
+          [x, y + h * 0.25],
+          [x + w, y],
+          [x + w, y + h],
+          [x, y + h],
+        ],
+      }
+
+    case 'display': {
+      const d = [
+        `M ${round(x)} ${round(cy)}`,
+        `L ${round(x + w * 0.16)} ${round(y)}`,
+        `L ${round(x + w * 0.78)} ${round(y)}`,
+        `C ${round(x + w)} ${round(y)}, ${round(x + w)} ${round(y + h)}, ${round(x + w * 0.78)} ${round(y + h)}`,
+        `L ${round(x + w * 0.16)} ${round(y + h)}`,
+        'Z',
+      ].join(' ')
+      return { kind: 'path', d }
+    }
+
+    case 'predefinedProcess': {
+      const inset = Math.min(w * 0.12, 16)
+      const d = [
+        `M ${round(x)} ${round(y)} L ${round(x + w)} ${round(y)} L ${round(x + w)} ${round(y + h)} L ${round(x)} ${round(y + h)} Z`,
+        `M ${round(x + inset)} ${round(y)} L ${round(x + inset)} ${round(y + h)}`,
+        `M ${round(x + w - inset)} ${round(y)} L ${round(x + w - inset)} ${round(y + h)}`,
+      ].join(' ')
+      return { kind: 'path', d }
+    }
+
+    case 'internalStorage': {
+      const inset = Math.min(w * 0.12, 18)
+      const d = [
+        `M ${round(x)} ${round(y)} L ${round(x + w)} ${round(y)} L ${round(x + w)} ${round(y + h)} L ${round(x)} ${round(y + h)} Z`,
+        `M ${round(x)} ${round(y + inset)} L ${round(x + w)} ${round(y + inset)}`,
+        `M ${round(x + inset)} ${round(y)} L ${round(x + inset)} ${round(y + h)}`,
+      ].join(' ')
+      return { kind: 'path', d }
+    }
+
     case 'text':
       return { kind: 'none' }
 

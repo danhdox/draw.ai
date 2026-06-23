@@ -28,6 +28,28 @@ function pushHistory(
   return { history: next, historyIndex: next.length - 1 }
 }
 
+// Shared paste: clone nodes/edges with fresh ids + a small offset, then select them.
+function pastePayload(get: () => DiagramStore, nodes: Node[], edges: Edge[]) {
+  const idMap = new Map<string, string>()
+  const ops: Diff['ops'] = []
+  nodes.forEach((node) => {
+    const newId = generateId('node')
+    idMap.set(node.id, newId)
+    ops.push({ type: 'addNode', node: { ...node, id: newId, x: node.x + 30, y: node.y + 30, locked: false } })
+  })
+  edges.forEach((edge) => {
+    const f = idMap.get(edge.from.nodeId)
+    const t = idMap.get(edge.to.nodeId)
+    if (f && t) {
+      ops.push({ type: 'addEdge', edge: { ...edge, id: generateId('edge'), from: { ...edge.from, nodeId: f }, to: { ...edge.to, nodeId: t } } })
+    }
+  })
+  if (ops.length > 0) {
+    get().applyDiffWithHistory({ ops, summary: 'Paste items' })
+    get().selectNodes(Array.from(idMap.values()))
+  }
+}
+
 export interface DiagramStore {
   // Current state
   diagram: Diagram
@@ -77,8 +99,11 @@ export interface DiagramStore {
   alignSelected: (edge: 'left' | 'centerH' | 'right' | 'top' | 'middle' | 'bottom') => void
   distributeSelected: (axis: 'h' | 'v') => void
   rotateSelectedBy: (deg: number) => void
+  toggleLockSelected: () => void
+  addNodeAtPoint: (shape: Partial<Node> & { type: Node['type'] }, x: number, y: number) => void
   copy: () => void
   paste: () => void
+  pasteText: (text: string) => void
 
   // Direct mutations (use sparingly, prefer diffs)
   setDiagram: (diagram: Diagram) => void
@@ -250,8 +275,10 @@ export const useDiagramStore = create<DiagramStore>((set, get) => ({
     const state = get()
     const ops: Diff['ops'] = []
 
-    // Delete selected nodes
+    // Delete selected nodes (locked nodes are protected).
     state.selectedNodeIds.forEach((id) => {
+      const node = state.diagram.nodes.find((n) => n.id === id)
+      if (node?.locked) return
       ops.push({ type: 'removeNode', id })
     })
 
@@ -278,64 +305,33 @@ export const useDiagramStore = create<DiagramStore>((set, get) => ({
 
   copy: () => {
     const state = get()
-    const nodes = state.diagram.nodes.filter((n) =>
-      state.selectedNodeIds.has(n.id)
-    )
+    const nodes = state.diagram.nodes.filter((n) => state.selectedNodeIds.has(n.id))
     const edges = state.diagram.edges.filter(
-      (e) =>
-        state.selectedNodeIds.has(e.from.nodeId) &&
-        state.selectedNodeIds.has(e.to.nodeId)
+      (e) => state.selectedNodeIds.has(e.from.nodeId) && state.selectedNodeIds.has(e.to.nodeId)
     )
     set({ clipboard: { nodes, edges } })
+    // Best-effort write to the system clipboard for cross-tab / cross-app paste.
+    if (nodes.length && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(JSON.stringify({ _drawai: 1, nodes, edges })).catch(() => {})
+    }
   },
 
   paste: () => {
-    const state = get()
-    if (!state.clipboard) return
+    const { clipboard } = get()
+    if (clipboard) pastePayload(get, clipboard.nodes, clipboard.edges)
+  },
 
-    const idMap = new Map<string, string>()
-    const ops: Diff['ops'] = []
-
-    // Create new IDs for nodes
-    state.clipboard.nodes.forEach((node) => {
-      const newId = generateId('node')
-      idMap.set(node.id, newId)
-      ops.push({
-        type: 'addNode',
-        node: {
-          ...node,
-          id: newId,
-          x: node.x + 30,
-          y: node.y + 30,
-        },
-      })
-    })
-
-    // Create edges with new IDs
-    state.clipboard.edges.forEach((edge) => {
-      const newFromId = idMap.get(edge.from.nodeId)
-      const newToId = idMap.get(edge.to.nodeId)
-      if (newFromId && newToId) {
-        ops.push({
-          type: 'addEdge',
-          edge: {
-            ...edge,
-            id: generateId('edge'),
-            from: { ...edge.from, nodeId: newFromId },
-            to: { ...edge.to, nodeId: newToId },
-          },
-        })
+  pasteText: (text: string) => {
+    try {
+      const parsed = JSON.parse(text)
+      if (parsed && parsed._drawai && Array.isArray(parsed.nodes)) {
+        pastePayload(get, parsed.nodes as Node[], (parsed.edges ?? []) as Edge[])
+        return
       }
-    })
-
-    if (ops.length > 0) {
-      get().applyDiffWithHistory({
-        ops,
-        summary: 'Paste items',
-      })
-      // Select the new nodes
-      get().selectNodes(Array.from(idMap.values()))
+    } catch {
+      /* not a draw.ai payload — fall through to the in-memory clipboard */
     }
+    get().paste()
   },
 
   duplicateSelected: () => {
@@ -386,7 +382,7 @@ export const useDiagramStore = create<DiagramStore>((set, get) => ({
 
     const ops: Diff['ops'] = []
     state.diagram.nodes.forEach((node) => {
-      if (state.selectedNodeIds.has(node.id)) {
+      if (state.selectedNodeIds.has(node.id) && !node.locked) {
         ops.push({
           type: 'updateNode',
           id: node.id,
@@ -522,9 +518,31 @@ export const useDiagramStore = create<DiagramStore>((set, get) => ({
     const state = get()
     if (state.selectedNodeIds.size === 0) return
     const ops: Diff['ops'] = state.diagram.nodes
-      .filter((n) => state.selectedNodeIds.has(n.id))
+      .filter((n) => state.selectedNodeIds.has(n.id) && !n.locked)
       .map((n) => ({ type: 'updateNode', id: n.id, patch: { rotation: (((n.rotation ?? 0) + deg) % 360 + 360) % 360 } }))
     if (ops.length > 0) get().applyDiffWithHistory({ ops, summary: 'Rotate' })
+  },
+
+  toggleLockSelected: () => {
+    const state = get()
+    const nodes = state.diagram.nodes.filter((n) => state.selectedNodeIds.has(n.id))
+    if (nodes.length === 0) return
+    const lock = !nodes.every((n) => n.locked) // if any unlocked → lock all
+    get().applyDiffWithHistory({
+      ops: nodes.map((n) => ({ type: 'updateNode', id: n.id, patch: { locked: lock } })),
+      summary: lock ? 'Lock' : 'Unlock',
+    })
+  },
+
+  addNodeAtPoint: (shape, x, y) => {
+    const id = generateId('node')
+    const w = shape.w ?? 168
+    const h = shape.h ?? 78
+    get().applyDiffWithHistory({
+      ops: [{ type: 'addNode', node: { id, type: shape.type, shapeKind: shape.shapeKind, x: Math.round(x - w / 2), y: Math.round(y - h / 2), w, h, text: shape.text ?? '', style: shape.style ?? { fill: '#ffffff', stroke: '#4a4a4a', strokeWidth: 2, fontSize: 14, fontFamily: 'Geist, ui-sans-serif' } } }],
+      summary: 'Add shape',
+    })
+    get().selectNodes([id])
   },
 
   setDiagram: (diagram: Diagram) => {
