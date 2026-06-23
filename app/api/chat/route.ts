@@ -11,7 +11,7 @@ import { openai } from '@ai-sdk/openai'
 import { z } from 'zod'
 import { DiagramSchema } from '@/lib/model/diagram'
 import { Diff } from '@/lib/model/diff'
-import { runLayout } from '@/lib/layout/layout'
+import { runElkLayout } from '@/lib/layout/elk'
 import {
   actionLabel,
   coerceDiffProposal,
@@ -20,12 +20,26 @@ import {
   summarizeDiff,
 } from '@/lib/agent/diagramAgent'
 import { AgentChatRequest, AgentMessage } from '@/lib/agent/types'
+import { rateLimit } from '@/lib/rateLimit'
 
 export const maxDuration = 30
 
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
 
 export async function POST(req: Request) {
+  // Throttle per client to protect the OpenAI quota from abuse / runaway loops.
+  // Skipped under test to avoid cross-test interference.
+  if (process.env.NODE_ENV !== 'test') {
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'anonymous'
+    const limit = rateLimit(`chat:${ip}`)
+    if (!limit.ok) {
+      return Response.json(
+        { error: 'Rate limit exceeded. Please wait a moment.' },
+        { status: 429, headers: { 'Retry-After': String(limit.retryAfter) } }
+      )
+    }
+  }
+
   const body = (await req.json()) as AgentChatRequest
   const parsedDiagram = DiagramSchema.safeParse(body.diagram)
 
@@ -67,7 +81,10 @@ export async function POST(req: Request) {
       })
 
       if (action === 'cleanup') {
-        const diff = runLayout(diagram, 'hierarchical', selectionIds.length > 0 ? selectionIds : undefined)
+        // Cleanup works fully offline (no OpenAI) via local ELK layout.
+        const diff = await runElkLayout(diagram, {
+          scopeIds: selectionIds.length > 0 ? selectionIds : undefined,
+        })
         writeDiffPreview(writer, runId, diff, diff.summary || 'Organized the diagram layout.')
         writeAssistantText(writer, runId, `Prepared a layout cleanup: ${summarizeDiff(diff)}.`)
         writeDone(writer, runId, action, startedAt)
@@ -160,11 +177,35 @@ export async function POST(req: Request) {
   return createUIMessageStreamResponse({ stream })
 }
 
-function buildSystemPrompt(action: string, diagram: unknown): string {
+// Compact, size-capped representation of the diagram so prompt tokens stay
+// bounded regardless of how large the canvas grows.
+function compactDiagram(diagram: { nodes: any[]; edges: any[] }): string {
+  const MAX_NODES = 80
+  const MAX_EDGES = 120
+  const nodes = diagram.nodes.slice(0, MAX_NODES).map((n) => ({
+    id: n.id,
+    type: n.shapeKind ?? n.type,
+    text: n.text,
+    x: Math.round(n.x),
+    y: Math.round(n.y),
+  }))
+  const edges = diagram.edges.slice(0, MAX_EDGES).map((e) => ({
+    from: e.from?.nodeId,
+    to: e.to?.nodeId,
+    label: e.label,
+  }))
+  return JSON.stringify({
+    nodes,
+    edges,
+    truncated: diagram.nodes.length > MAX_NODES || diagram.edges.length > MAX_EDGES,
+  })
+}
+
+function buildSystemPrompt(action: string, diagram: { nodes: any[]; edges: any[] }): string {
   return `You are a diagram-building agent inside draw.ai.
 
-Current diagram JSON:
-${JSON.stringify(diagram)}
+Current diagram (compact JSON, possibly truncated):
+${compactDiagram(diagram)}
 
 When asked to generate or revise a diagram, use the proposeDiagramDiff tool exactly once.
 The diff must use this operation model: addNode, updateNode, removeNode, addEdge, updateEdge, removeEdge, group, ungroup, setMeta.

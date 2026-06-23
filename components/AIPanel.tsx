@@ -3,11 +3,11 @@
 import { Fragment, startTransition, useEffect, useState } from 'react'
 import { DefaultChatTransport } from 'ai'
 import { useChat } from '@ai-sdk/react'
-import { Check, Copy, Play, X } from 'lucide-react'
+import { Check, Copy, HelpCircle, LayoutGrid, Play, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useDiagramStore } from '@/lib/store/useDiagramStore'
 import { useAgentStore } from '@/lib/store/useAgentStore'
-import { AgentDiffData, AgentMessage, AgentRunData, AgentTraceData } from '@/lib/agent/types'
+import { AgentAction, AgentDiffData, AgentMessage, AgentRunData, AgentTraceData } from '@/lib/agent/types'
 import {
   Conversation,
   ConversationContent,
@@ -113,21 +113,24 @@ export function AIPanel({
     })
   }, [messages, status])
 
-  const submit = (message: PromptInputMessage) => {
-    const text = message.text.trim()
-    if (!text) return
+  const runAction = (action: AgentAction, text: string) => {
     setView('current')
-
     sendMessage(
       { text },
       {
         body: {
           diagram,
           selectionIds: Array.from(selectedNodeIds),
-          action: 'generate',
+          action,
         },
       }
     )
+  }
+
+  const submit = (message: PromptInputMessage) => {
+    const text = message.text.trim()
+    if (!text) return
+    runAction('generate', text)
   }
 
   const acceptDiff = () => {
@@ -202,6 +205,33 @@ export function AIPanel({
           </Conversation>
 
           {activeDiff && <DiffPreview diff={activeDiff} onAccept={acceptDiff} onReject={rejectDiff} compact />}
+
+          <div className="flex flex-wrap gap-2" data-testid="agent-actions">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1.5 rounded-md text-[12px]"
+              disabled={isBusy}
+              data-testid="agent-action-cleanup"
+              onClick={() => runAction('cleanup', 'Clean up the diagram layout.')}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              Cleanup Layout
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1.5 rounded-md text-[12px]"
+              disabled={isBusy || diagram.nodes.length === 0}
+              data-testid="agent-action-explain"
+              onClick={() => runAction('explain', 'Explain what this diagram represents.')}
+            >
+              <HelpCircle className="h-3.5 w-3.5" />
+              Explain Diagram
+            </Button>
+          </div>
 
           <PromptInput onSubmit={submit} data-testid="agent-prompt-form">
             <PromptInputTextarea

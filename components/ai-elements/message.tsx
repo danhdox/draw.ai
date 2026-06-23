@@ -1,7 +1,6 @@
 'use client'
 
 import * as React from 'react'
-import { Streamdown, type StreamdownProps } from 'streamdown'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import type { UIMessage } from 'ai'
@@ -37,13 +36,20 @@ export function MessageContent({ className, ...props }: React.HTMLAttributes<HTM
   )
 }
 
-export function MessageResponse({ className, ...props }: StreamdownProps) {
+// Plain, dependency-free text renderer. (Previously used `streamdown`, which
+// pulled in mermaid + dompurify — removed to drop the vulnerable transitive
+// chain and shrink the bundle. AI responses render as wrapped plain text.)
+export function MessageResponse({
+  className,
+  children,
+}: {
+  className?: string
+  children?: React.ReactNode
+}) {
   return (
-    <Streamdown
-      className={cn('prose prose-sm max-w-none text-[13px] leading-5 prose-p:my-1 prose-pre:rounded-md', className)}
-      parseIncompleteMarkdown
-      {...props}
-    />
+    <div className={cn('whitespace-pre-wrap break-words text-[13px] leading-5', className)}>
+      {children}
+    </div>
   )
 }
 
